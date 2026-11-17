@@ -1,0 +1,19 @@
+[project]
+name = "youtube-downloader"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Arbi04", email = "arbirestandi12@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.163.2",
+]
+
+[project.scripts]
+youtube-downloader = "youtube_downloader:main"
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14.0"]
+build-backend = "uv_build"
