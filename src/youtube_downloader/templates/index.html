@@ -6,6 +6,7 @@
     <title>YouTube Downloader</title>
     <link rel="stylesheet" href="/static/app.css" />
     <script src="/static/htmx.min.js" defer></script>
+    <script src="/static/app.js" defer></script>
   </head>
   <body>
     <main class="shell">
@@ -15,8 +16,13 @@
       </header>
 
       <section class="card">
-        {# The form is inert until ticket #5 wires the preview endpoint. #}
-        <form class="url-form" onsubmit="return false">
+        <form
+          class="url-form"
+          hx-post="/preview"
+          hx-target="#result"
+          hx-swap="innerHTML"
+          hx-disabled-elt="find button"
+        >
           <label class="visually-hidden" for="url">YouTube URL</label>
           <input
             id="url"
@@ -29,8 +35,13 @@
           />
           <button class="btn btn-primary" type="submit">Check link</button>
         </form>
-        <p class="hint">Video preview appears here.</p>
+
+        <div id="result" class="result">
+          <p class="hint">Video preview appears here.</p>
+        </div>
       </section>
+
+      <div id="job-slot"></div>
 
       <footer class="notes">
         <span>Runs on your machine.</span>

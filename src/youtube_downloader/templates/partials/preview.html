@@ -1,0 +1,48 @@
+<section class="preview">
+  <div class="preview-head">
+    {% if preview.thumbnail_url %}
+      <img
+        class="thumb"
+        src="{{ preview.thumbnail_url }}"
+        alt=""
+        loading="lazy"
+        referrerpolicy="no-referrer"
+      />
+    {% endif %}
+    <div class="preview-text">
+      <h2 class="preview-title">{{ preview.title }}</h2>
+      <p class="preview-meta">
+        {{ preview.duration_seconds | duration }}
+        {% if preview.max_height %} &middot; up to {{ preview.max_height }}p{% endif %}
+      </p>
+    </div>
+  </div>
+
+  <form
+    class="preset-grid"
+    hx-post="/jobs"
+    hx-target="#job-slot"
+    hx-swap="innerHTML"
+  >
+    <input type="hidden" name="video_id" value="{{ preview.video_id }}" />
+    <input
+      type="hidden"
+      name="max_height"
+      value="{{ preview.max_height if preview.max_height else '' }}"
+    />
+    {% for preset in presets %}
+      <button
+        class="preset"
+        type="submit"
+        name="preset"
+        value="{{ preset.key }}"
+        {% if not preset.available %}disabled{% endif %}
+      >
+        <span class="preset-label">{{ preset.label }}</span>
+        {% if not preset.available %}
+          <span class="preset-note">max {{ preview.max_height }}p</span>
+        {% endif %}
+      </button>
+    {% endfor %}
+  </form>
+</section>

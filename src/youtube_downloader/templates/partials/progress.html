@@ -1,0 +1,48 @@
+<div
+  id="job"
+  class="card job"
+  {% if not job.finished %}
+    hx-get="/jobs/{{ job.id }}"
+    hx-trigger="every 1s"
+    hx-swap="outerHTML"
+  {% endif %}
+>
+  <div class="job-head">
+    <span class="pill">{{ job.preset.label }}</span>
+    <span class="job-state">{{ job.state.value }}</span>
+  </div>
+
+  {% if job.state.value == "done" %}
+    <p class="job-note">Ready to save.</p>
+    <a class="btn btn-primary" href="/jobs/{{ job.id }}/file">Save file</a>
+  {% elif job.state.value == "failed" %}
+    <div class="error" role="alert">
+      {{ job.error.message if job.error else "Download failed." }}
+    </div>
+  {% elif job.state.value == "cancelled" %}
+    <p class="job-note">Cancelled. Nothing was saved.</p>
+  {% else %}
+    <div
+      class="bar"
+      role="progressbar"
+      aria-valuenow="{{ job.progress }}"
+      aria-valuemin="0"
+      aria-valuemax="100"
+    >
+      <div class="bar-fill" style="width: {{ job.progress }}%"></div>
+    </div>
+    <p class="job-meta">
+      <strong>{{ "%.0f" | format(job.progress) }}%</strong>
+      {% if job.speed %}&middot; {{ job.speed | speed }}{% endif %}
+      {% if job.eta is not none and job.eta > 0 %}&middot; ETA {{ job.eta | eta }}{% endif %}
+    </p>
+    <button
+      class="btn btn-danger"
+      hx-post="/jobs/{{ job.id }}/cancel"
+      hx-target="#job"
+      hx-swap="outerHTML"
+    >
+      Cancel
+    </button>
+  {% endif %}
+</div>
