@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YouTube Downloader</title>
+    <link rel="stylesheet" href="/static/app.css" />
+    <script src="/static/htmx.min.js" defer></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="masthead">
+        <h1>YouTube<br />Downloader</h1>
+        <p class="tagline">Paste a link. Pick a format. Save the file.</p>
+      </header>
+
+      <section class="card">
+        {# The form is inert until ticket #5 wires the preview endpoint. #}
+        <form class="url-form" onsubmit="return false">
+          <label class="visually-hidden" for="url">YouTube URL</label>
+          <input
+            id="url"
+            name="url"
+            type="url"
+            inputmode="url"
+            autocomplete="off"
+            placeholder="https://www.youtube.com/watch?v=..."
+            required
+          />
+          <button class="btn btn-primary" type="submit">Check link</button>
+        </form>
+        <p class="hint">Video preview appears here.</p>
+      </section>
+
+      <footer class="notes">
+        <span>Runs on your machine.</span>
+        <span>One video at a time.</span>
+        <span>No playlists.</span>
+      </footer>
+    </main>
+  </body>
+</html>

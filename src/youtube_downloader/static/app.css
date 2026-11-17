@@ -1,0 +1,163 @@
+/* Neobrutalism: cream paper, thick ink borders, hard shadows, no blur. */
+
+:root {
+  --cream: #fff8e7;
+  --paper: #ffffff;
+  --ink: #0b0b0b;
+  --yellow: #ffd43b;
+  --pink: #ff5c8a;
+  --cyan: #3bc9db;
+  --muted: #4a463d;
+  --disabled: #e8e4d8;
+  --disabled-ink: #6b675c;
+
+  --border: 3px solid var(--ink);
+  --shadow-card: 6px 6px 0 var(--ink);
+  --shadow-button: 4px 4px 0 var(--ink);
+
+  --font-heavy: "Arial Black", "Segoe UI Black", Impact, sans-serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: var(--font-body);
+  line-height: 1.5;
+}
+
+.shell {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 56px 20px 80px;
+}
+
+.masthead h1 {
+  margin: 0 0 12px;
+  font-family: var(--font-heavy);
+  font-size: clamp(2.25rem, 7vw, 3.5rem);
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+}
+
+.tagline {
+  margin: 0 0 32px;
+  font-size: 1.05rem;
+  color: var(--muted);
+}
+
+.card {
+  padding: 24px;
+  background: var(--paper);
+  border: var(--border);
+  box-shadow: var(--shadow-card);
+}
+
+.url-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.url-form input {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 14px 16px;
+  font: inherit;
+  font-size: 1rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--border);
+  border-radius: 0;
+}
+
+.url-form input::placeholder {
+  color: #8a8577;
+}
+
+.url-form input:focus-visible {
+  outline: 3px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+/* Buttons read as physical blocks: pressing moves them into their own shadow. */
+
+.btn {
+  padding: 14px 22px;
+  font-family: var(--font-heavy);
+  font-size: 0.9rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--border);
+  border-radius: 0;
+  box-shadow: var(--shadow-button);
+  cursor: pointer;
+}
+
+.btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.btn:focus-visible {
+  outline: 3px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.btn-primary {
+  background: var(--yellow);
+}
+
+.btn-danger {
+  background: var(--pink);
+}
+
+.btn:disabled {
+  background: var(--disabled);
+  color: var(--disabled-ink);
+  box-shadow: 4px 4px 0 #b5b0a4;
+  cursor: not-allowed;
+}
+
+.btn:disabled:active {
+  transform: none;
+  box-shadow: 4px 4px 0 #b5b0a4;
+}
+
+.hint {
+  margin: 18px 0 0;
+  color: var(--muted);
+}
+
+.notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 28px;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
