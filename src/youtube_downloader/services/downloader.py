@@ -7,6 +7,7 @@ and what would make swapping engines a local change.
 
 from __future__ import annotations
 
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -133,6 +134,18 @@ class Downloader(Protocol):
 
 JS_RUNTIME_CANDIDATES = ("deno", "node", "bun", "quickjs")
 
+# A merged download writes one temporary file per stream, named "... f<id>.<ext>".
+_MERGED_PART = re.compile(r"\.f[\w-]+\.[A-Za-z0-9]+$")
+
+# Nothing reads as complete until the job itself is done.
+_CAP_BEFORE_DONE = 99.0
+
+
+def _is_merged_part(filename: str | None) -> bool:
+    """True when yt-dlp is writing one stream of a two-stream download."""
+    return bool(filename and _MERGED_PART.search(Path(filename).name))
+
+
 
 def detect_js_runtimes() -> dict[str, dict]:
     """Pick the first JavaScript runtime on PATH.
@@ -197,27 +210,52 @@ class YtDlpDownloader:
         return f"%(title).120B [%(id)s] {preset.key}.%(ext)s"
 
     def make_progress_hook(
-        self, on_progress: ProgressCallback, should_cancel: CancelCheck
+        self,
+        on_progress: ProgressCallback,
+        should_cancel: CancelCheck,
+        streams: int = 1,
     ) -> Callable[[dict], None]:
+        """Progress for one job, as a single number that never goes backwards.
+
+        yt-dlp reports per stream: a 720p download reports the video file
+        reaching 100%, then starts the audio file again at 0% — and after every
+        stream it asks for a "park at 99 while ffmpeg works" update. Reported
+        raw, that fills the bar, drops it, and refills it. So each stream gets
+        its own slice of the bar, and the total is only shown as complete when
+        the job itself is.
+        """
+        count = max(1, streams)
+        index = 0
+        shown = 0.0
+
+        def report(percent: float, speed: float | None, eta: int | None) -> None:
+            nonlocal shown
+            shown = max(shown, min(percent, _CAP_BEFORE_DONE))
+            on_progress(Progress(percent=round(shown, 1), speed=speed, eta=eta))
+
         def hook(status: dict) -> None:
+            nonlocal count, index
             if should_cancel():
                 raise JobCancelled()
 
             state = status.get("status")
             if state == "downloading":
+                if count > 1 and index == 0 and not _is_merged_part(
+                    status.get("filename")
+                ):
+                    # The selector fell back to one progressive stream.
+                    count = 1
                 total = status.get("total_bytes") or status.get("total_bytes_estimate")
                 downloaded = status.get("downloaded_bytes") or 0
-                percent = (downloaded / total * 100) if total else 0.0
-                on_progress(
-                    Progress(
-                        percent=round(percent, 1),
-                        speed=status.get("speed"),
-                        eta=status.get("eta"),
-                    )
+                within = (downloaded / total) if total else 0.0
+                report(
+                    (index + within) / count * 100,
+                    status.get("speed"),
+                    status.get("eta"),
                 )
             elif state == "finished":
-                # Postprocessing (merge/transcode) still runs after this point.
-                on_progress(Progress(percent=99.0, speed=None, eta=0))
+                index += 1
+                report(index / count * 100, None, 0)
 
         return hook
 
@@ -236,7 +274,13 @@ class YtDlpDownloader:
             "format": format_selector(preset),
             "outtmpl": self.output_template(preset),
             "paths": {"home": str(destination)},
-            "progress_hooks": [self.make_progress_hook(on_progress, should_cancel)],
+            "progress_hooks": [
+                self.make_progress_hook(
+                    on_progress,
+                    should_cancel,
+                    streams=2 if preset.kind == PresetKind.VIDEO else 1,
+                )
+            ],
             "overwrites": True,
         }
         if preset.kind == PresetKind.AUDIO:

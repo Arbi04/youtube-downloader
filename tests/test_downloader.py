@@ -93,6 +93,112 @@ def test_progress_hook_parks_at_99_while_postprocessing(downloader):
     assert seen[0].percent == 99.0
 
 
+def _stream(format_id, downloaded, total, extension="mp4", speed=1.0):
+    """The shape yt-dlp reports while writing one stream of a merged download."""
+    return {
+        "status": "downloading",
+        "downloaded_bytes": downloaded,
+        "total_bytes": total,
+        "speed": speed,
+        "eta": 5,
+        "filename": f"C:/tmp/Video [dQw4w9WgXcQ] mp4-720.f{format_id}.{extension}",
+    }
+
+
+def test_merged_download_gives_each_stream_its_own_slice_of_the_bar(downloader):
+    seen: list[Progress] = []
+    hook = downloader.make_progress_hook(seen.append, lambda: False, streams=2)
+
+    hook(_stream("137", 500, 1000))  # half of the video stream
+    hook({"status": "finished"})
+    hook(_stream("140", 250, 1000, extension="m4a"))  # a quarter of the audio
+
+    assert [progress.percent for progress in seen] == [25.0, 50.0, 62.5]
+
+
+def test_progress_never_goes_backwards_across_streams(downloader):
+    seen: list[Progress] = []
+    hook = downloader.make_progress_hook(seen.append, lambda: False, streams=2)
+
+    for downloaded in (0, 500, 1000):
+        hook(_stream("137", downloaded, 1000))
+    hook({"status": "finished"})
+    for downloaded in (0, 250, 1000):
+        hook(_stream("140", downloaded, 1000, extension="m4a"))
+    hook({"status": "finished"})
+
+    percents = [progress.percent for progress in seen]
+    assert percents == sorted(percents)
+    assert percents[0] == 0.0
+    assert percents[-1] == 99.0
+
+
+def test_a_progressive_fallback_uses_the_whole_bar(downloader):
+    seen: list[Progress] = []
+    hook = downloader.make_progress_hook(seen.append, lambda: False, streams=2)
+
+    hook(
+        {
+            "status": "downloading",
+            "downloaded_bytes": 250,
+            "total_bytes": 1000,
+            "filename": "C:/tmp/Video [dQw4w9WgXcQ] mp4-720.mp4",
+        }
+    )
+
+    assert seen[0].percent == 25.0
+
+
+def test_a_full_stream_still_reads_as_incomplete_until_the_job_is_done(downloader):
+    seen: list[Progress] = []
+    hook = downloader.make_progress_hook(seen.append, lambda: False)
+
+    hook(_stream("140", 1000, 1000, extension="m4a"))
+    hook({"status": "finished"})
+
+    assert [progress.percent for progress in seen] == [99.0, 99.0]
+
+
+@pytest.mark.parametrize(("preset_key", "expected"), [("mp4-720", 2), ("mp3-192", 1)])
+def test_presets_declare_how_many_streams_they_download(
+    downloader, monkeypatch, tmp_path, preset_key, expected
+):
+    preset = preset_by_key(preset_key)
+    destination = tmp_path / "out"
+    destination.mkdir()
+    produced = destination / f"Video [dQw4w9WgXcQ] {preset_key}.{preset.extension}"
+    produced.write_bytes(b"data")
+
+    class FakeYdl:
+        def __init__(self, _options):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def extract_info(self, _url, download=False):
+            return {"requested_downloads": [{"filepath": str(produced)}]}
+
+    captured: dict[str, int] = {}
+    real = YtDlpDownloader.make_progress_hook
+
+    def spy(self, on_progress, should_cancel, streams=1):
+        captured["streams"] = streams
+        return real(self, on_progress, should_cancel, streams)
+
+    monkeypatch.setattr(downloader_module.yt_dlp, "YoutubeDL", FakeYdl)
+    monkeypatch.setattr(YtDlpDownloader, "make_progress_hook", spy)
+
+    downloader.download(
+        "dQw4w9WgXcQ", preset, destination, lambda _progress: None, lambda: False
+    )
+
+    assert captured["streams"] == expected
+
+
 def test_progress_hook_raises_when_cancelled(downloader):
     hook = downloader.make_progress_hook(lambda _progress: None, lambda: True)
 
