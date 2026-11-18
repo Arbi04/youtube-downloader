@@ -3,8 +3,11 @@
 A local web app that turns a YouTube link into a file you can actually play: pick a resolution or an MP3 bitrate, watch the progress bar, save the file. One user, one video at a time, no accounts, no database.
 
 <p align="center">
-  <!-- Drop a screenshot at docs/screenshot.png and replace this line. -->
-  <em>Screenshot coming soon.</em>
+  <img
+    src="docs/screenshot.png"
+    alt="The start screen: a cream page with a thick black border card, a URL field, and a yellow Check link button"
+    width="720"
+  />
 </p>
 
 ## Why local-only
@@ -56,15 +59,23 @@ All settings are environment variables, read once at startup.
 
 ## When YouTube says "Sign in to confirm you're not a bot"
 
-Some videos — and eventually most requests from a datacenter IP — need cookies. Export `cookies.txt` from a signed-in browser in Netscape format, then:
+Some videos — and eventually most requests from a datacenter IP — need cookies. yt-dlp reads them from a Netscape-format `cookies.txt`.
 
-```bash
-YTDLP_COOKIES_FILE=/path/to/cookies.txt uv run youtube-downloader
+1. Log in to YouTube in your browser.
+2. Install a cookie-export extension such as **Get cookies.txt LOCALLY** (Chrome, Edge, Firefox). It produces the Netscape format yt-dlp expects and keeps the export local.
+3. Open `youtube.com`, click the extension, and export. Save the file as `cookies.txt` outside this repo.
+4. Point the app at it and restart:
+
+```powershell
+$env:YTDLP_COOKIES_FILE = "C:\path\to\cookies.txt"
+uv run youtube-downloader
 ```
+
+On macOS/Linux the same variable works inline: `YTDLP_COOKIES_FILE=/path/to/cookies.txt uv run youtube-downloader`.
 
 The app maps that failure to a message naming this variable, rather than showing a traceback. The same applies to age-restricted videos.
 
-Treat `cookies.txt` as a credential: it grants account access. Keep it outside the repo — `.gitignore` does not save you if you paste it into an issue.
+`cookies.txt` is a credential: it grants access to the account it came from. `.gitignore` excludes `cookies*.txt`, but keep the file outside the project anyway, and never paste it into an issue. Cookies expire after weeks or months — re-export when downloads start failing again.
 
 ## Known limitations
 
