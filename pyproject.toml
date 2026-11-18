@@ -9,7 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "fastapi[standard]>=0.163.2",
-    "yt-dlp>=2026.10.26",
+    "yt-dlp[default]>=2026.10.26",
 ]
 
 [project.scripts]

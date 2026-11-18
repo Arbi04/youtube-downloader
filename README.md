@@ -18,7 +18,11 @@ If you ever expose it, put it behind authentication and a rate limit first.
 
 ## Quickstart
 
-Requirements: [uv](https://docs.astral.sh/uv/) and `ffmpeg` on `PATH` (needed to merge high-resolution video with audio and to produce MP3s).
+Requirements:
+
+- [uv](https://docs.astral.sh/uv/)
+- `ffmpeg` on `PATH` — merges high-resolution video with audio and produces MP3s
+- [Node.js](https://nodejs.org/) on `PATH` — solves YouTube's signature challenge. Deno, Bun, or QuickJS work too; the app uses whichever it finds first.
 
 ```bash
 uv sync
@@ -29,7 +33,12 @@ Open <http://127.0.0.1:8000>.
 
 ```bash
 ffmpeg -version   # must print a version; the app reports a clear error if it is missing
+node --version
 ```
+
+The `yt-dlp[default]` extra is deliberate: it installs `yt-dlp-ejs`, the challenge
+solver. Without a solver, YouTube hides every video stream on an account-backed
+request and only thumbnails come back.
 
 ## How it works
 
@@ -77,6 +86,14 @@ The app maps that failure to a message naming this variable, rather than showing
 
 `cookies.txt` is a credential: it grants access to the account it came from. `.gitignore` excludes `cookies*.txt`, but keep the file outside the project anyway, and never paste it into an issue. Cookies expire after weeks or months — re-export when downloads start failing again.
 
+### Cookies need a JavaScript runtime
+
+Signing in changes which formats YouTube hands out: they arrive behind the
+`n`-signature challenge, which only a JavaScript runtime can solve. If none is
+installed, a signed-in request returns *fewer* formats than an anonymous one —
+usually none at all — and the app reports "no downloadable format matched".
+Install Node.js (or Deno) and restart; the app detects it automatically.
+
 ## Known limitations
 
 - **No playlists or channels** — one video per link, by design.
@@ -84,6 +101,7 @@ The app maps that failure to a message naming this variable, rather than showing
 - **Files are temporary** — the server deletes its copy after the browser has the file, and sweeps leftovers older than two hours at startup.
 - **Not multi-user** — no auth, no per-user quotas.
 - **YouTube moves constantly** — when downloads start failing after a YouTube change, upgrade the engine: `uv lock --upgrade-package yt-dlp && uv sync`.
+- **Signed-in requests need a JS runtime** — see [Cookies need a JavaScript runtime](#cookies-need-a-javascript-runtime). This is a yt-dlp requirement, not a choice this app makes.
 
 ## Tests
 

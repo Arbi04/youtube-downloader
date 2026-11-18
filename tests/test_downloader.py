@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from youtube_downloader.config import Settings
+from youtube_downloader.services import downloader as downloader_module
 from youtube_downloader.services.downloader import (
     DownloadError,
     JobCancelled,
@@ -27,6 +28,7 @@ def downloader():
         ("ERROR: The uploader has not made this video available in your country", "geo_blocked"),
         ("ERROR: Video unavailable", "unavailable"),
         ("ERROR: ffmpeg not found. Please install or provide the path", "ffmpeg_missing"),
+        ("ERROR: Requested format is not available. Use --list-formats", "format_unavailable"),
         ("ERROR: something exploded", "unknown"),
     ],
 )
@@ -111,6 +113,30 @@ def test_output_template_names_the_preset_and_caps_the_title(downloader):
     template = downloader.output_template(preset_by_key("mp4-720"))
 
     assert template == "%(title).120B [%(id)s] mp4-720.%(ext)s"
+
+
+def test_uses_the_first_available_js_runtime(downloader, monkeypatch):
+    monkeypatch.setattr(
+        downloader_module.shutil,
+        "which",
+        lambda name: "C:/node/node.exe" if name == "node" else None,
+    )
+
+    assert downloader._base_options()["js_runtimes"] == {"node": {}}
+
+
+def test_prefers_deno_when_it_is_installed(downloader, monkeypatch):
+    monkeypatch.setattr(
+        downloader_module.shutil, "which", lambda name: f"/usr/bin/{name}"
+    )
+
+    assert downloader._base_options()["js_runtimes"] == {"deno": {}}
+
+
+def test_omits_js_runtime_when_none_is_installed(downloader, monkeypatch):
+    monkeypatch.setattr(downloader_module.shutil, "which", lambda name: None)
+
+    assert "js_runtimes" not in downloader._base_options()
 
 
 def test_yt_dlp_is_imported_only_by_the_downloader():

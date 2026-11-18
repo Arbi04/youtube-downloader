@@ -7,6 +7,7 @@ and what would make swapping engines a local change.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
@@ -78,6 +79,12 @@ _ERROR_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
         "The uploader or YouTube has blocked this video in your region.",
     ),
     (
+        "format_unavailable",
+        ("requested format is not available",),
+        "No downloadable format matched this video. If YTDLP_COOKIES_FILE is set, "
+        "install Node.js — YouTube's newer formats need a JavaScript runtime to unlock.",
+    ),
+    (
         "unavailable",
         (
             "video unavailable",
@@ -124,6 +131,22 @@ class Downloader(Protocol):
     ) -> Path: ...
 
 
+JS_RUNTIME_CANDIDATES = ("deno", "node", "bun", "quickjs")
+
+
+def detect_js_runtimes() -> dict[str, dict]:
+    """Pick the first JavaScript runtime on PATH.
+
+    yt-dlp probes only Deno by default, but most machines ship Node. A runtime
+    is not optional once cookies are configured: YouTube then serves formats
+    behind the n-sig challenge, and without a solver the video has no streams.
+    """
+    for name in JS_RUNTIME_CANDIDATES:
+        if shutil.which(name):
+            return {name: {}}
+    return {}
+
+
 class YtDlpDownloader:
     """The real engine, configured once from :class:`Settings`."""
 
@@ -140,6 +163,11 @@ class YtDlpDownloader:
         }
         if self._settings.cookies_file:
             options["cookiefile"] = str(self._settings.cookies_file)
+
+        runtimes = detect_js_runtimes()
+        if runtimes:
+            options["js_runtimes"] = runtimes
+
         return options
 
     def preview(self, video_id: str) -> RawPreview:
