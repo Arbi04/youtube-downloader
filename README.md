@@ -46,6 +46,18 @@ request and only thumbnails come back.
 2. Pick a preset. A **Job** starts in the background and the page polls its progress once a second.
 3. When the job finishes, **Save file** hands you the file and the server deletes its temporary copy.
 
+<p align="center">
+  <img
+    src="docs/screenshot_preview_progress_bar.png"
+    alt="The same page after a link is checked: a preview card with thumbnail, title, duration and up to 996p, four preset buttons with MP4 1080p disabled and labelled max 996p, and a job card showing MP4 720p, a pink progress bar at 32 percent with 16.3 MB/s, and a Cancel button"
+    width="720"
+  />
+</p>
+
+A video download is two streams — video, then audio — so each gets its own half of
+the bar. The number never goes backwards, and nothing reads as complete until the
+job is.
+
 | Preset | What you get |
 | --- | --- |
 | `mp4-360` / `mp4-720` / `mp4-1080` | H.264 + AAC in an MP4, merged with ffmpeg. H.264 is preferred so the file plays in Windows Media Player, QuickTime, phones, and editors; other codecs are used only when H.264 is unavailable. |
