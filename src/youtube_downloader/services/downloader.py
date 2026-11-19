@@ -19,8 +19,11 @@ from youtube_downloader.config import Settings
 from youtube_downloader.services.youtube import (
     Preset,
     PresetKind,
+    RawPlaylistItem,
+    RawPlaylistPreview,
     RawPreview,
     format_selector,
+    playlist_url,
     watch_url,
 )
 
@@ -122,6 +125,8 @@ def map_error(exc: Exception) -> DownloadError:
 class Downloader(Protocol):
     def preview(self, video_id: str) -> RawPreview: ...
 
+    def playlist_preview(self, playlist_id: str) -> RawPlaylistPreview: ...
+
     def download(
         self,
         video_id: str,
@@ -203,6 +208,40 @@ class YtDlpDownloader:
             duration_seconds=info.get("duration"),
             thumbnail_url=info.get("thumbnail"),
             heights=tuple(sorted(heights)),
+        )
+
+    def playlist_preview(self, playlist_id: str) -> RawPlaylistPreview:
+        """List a playlist's items without touching each video's metadata.
+
+        Flat extraction returns ids, titles, and durations in one request. Asking
+        for full metadata per entry would make a 25-item Preview slower than the
+        download, and only availability would improve — see ADR-0002.
+        """
+        options = {
+            **self._base_options(),
+            "skip_download": True,
+            "extract_flat": "in_playlist",
+            "noplaylist": False,
+        }
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(playlist_url(playlist_id), download=False)
+        except Exception as exc:  # noqa: BLE001 - translated below
+            raise map_error(exc) from exc
+
+        items = tuple(
+            RawPlaylistItem(
+                video_id=entry["id"],
+                title=entry.get("title") or entry["id"],
+                duration_seconds=entry.get("duration"),
+            )
+            for entry in (info.get("entries") or [])
+            if entry and entry.get("id")
+        )
+        return RawPlaylistPreview(
+            playlist_id=playlist_id,
+            title=info.get("title") or "Playlist",
+            items=items,
         )
 
     def output_template(self, preset: Preset) -> str:

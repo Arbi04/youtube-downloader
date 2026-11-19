@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 from youtube_downloader.services.downloader import Progress
-from youtube_downloader.services.youtube import RawPreview
+from youtube_downloader.services.youtube import (
+    RawPlaylistItem,
+    RawPlaylistPreview,
+    RawPreview,
+)
 
 DEFAULT_VIDEO_ID = "dQw4w9WgXcQ"
+PLAYLIST_ID = "PLwiyx1dc3P2JR9N8gQaQN_BCvlSlap7re"
 
 
 class ManualExecutor:
@@ -23,7 +28,12 @@ class ManualExecutor:
 
 
 class FakeDownloader:
-    def __init__(self, raw_preview: RawPreview | None = None, behaviour=None) -> None:
+    def __init__(
+        self,
+        raw_preview: RawPreview | None = None,
+        raw_playlist: RawPlaylistPreview | None = None,
+        behaviour=None,
+    ) -> None:
         self.raw_preview = raw_preview or RawPreview(
             video_id=DEFAULT_VIDEO_ID,
             title="Test video",
@@ -31,11 +41,25 @@ class FakeDownloader:
             thumbnail_url="https://i.ytimg.com/vi/dQw4w9WgXcQ/hq.jpg",
             heights=(360, 720),
         )
+        self.raw_playlist = raw_playlist or RawPlaylistPreview(
+            playlist_id=PLAYLIST_ID,
+            title="Test playlist",
+            items=(
+                RawPlaylistItem("aaaaaaaaaaa", "First song", 61),
+                RawPlaylistItem("bbbbbbbbbbb", "Second song", 122),
+                RawPlaylistItem("ccccccccccc", "Third song", 183),
+            ),
+        )
         self.calls: list[tuple[str, str]] = []
+        self.playlist_calls: list[str] = []
         self.behaviour = behaviour
 
     def preview(self, video_id: str) -> RawPreview:
         return self.raw_preview
+
+    def playlist_preview(self, playlist_id: str) -> RawPlaylistPreview:
+        self.playlist_calls.append(playlist_id)
+        return self.raw_playlist
 
     def download(self, video_id, preset, destination, on_progress, should_cancel):
         self.calls.append((video_id, preset.key))

@@ -255,3 +255,61 @@ def test_yt_dlp_is_imported_only_by_the_downloader():
     ]
 
     assert offenders == []
+
+def test_playlist_preview_reads_flat_entries(downloader, monkeypatch):
+    captured: dict = {}
+
+    class FakeYdl:
+        def __init__(self, options):
+            captured.update(options)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def extract_info(self, url, download=False):
+            captured["url"] = url
+            captured["download"] = download
+            return {
+                "title": "My list",
+                "entries": [
+                    {"id": "aaaaaaaaaaa", "title": "One", "duration": 61},
+                    None,
+                    {"id": "bbbbbbbbbbb", "title": None, "duration": None},
+                ],
+            }
+
+    monkeypatch.setattr(downloader_module.yt_dlp, "YoutubeDL", FakeYdl)
+
+    raw = downloader.playlist_preview("PL1234567890")
+
+    assert captured["url"] == "https://www.youtube.com/playlist?list=PL1234567890"
+    assert captured["download"] is False
+    assert captured["extract_flat"] == "in_playlist"
+    assert captured["noplaylist"] is False
+    assert raw.title == "My list"
+    assert [item.video_id for item in raw.items] == ["aaaaaaaaaaa", "bbbbbbbbbbb"]
+    assert raw.items[0].duration_seconds == 61
+    assert raw.items[1].title == "bbbbbbbbbbb"
+
+
+def test_playlist_preview_translates_engine_failures(downloader, monkeypatch):
+    class BrokenYdl:
+        def __init__(self, _options):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def extract_info(self, _url, download=False):
+            raise RuntimeError("ERROR: Private playlist")
+
+    monkeypatch.setattr(downloader_module.yt_dlp, "YoutubeDL", BrokenYdl)
+
+    with pytest.raises(DownloadError):
+        downloader.playlist_preview("PL1234567890")

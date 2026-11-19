@@ -7,9 +7,11 @@ it is ever fetched.
 
 from __future__ import annotations
 
+import re
 import string
 from dataclasses import dataclass, replace
 from enum import Enum
+from typing import Iterable
 from urllib.parse import parse_qs, urlparse
 
 ALLOWED_HOSTS = frozenset(
@@ -28,13 +30,32 @@ _ID_SEGMENTS = frozenset({"shorts", "embed", "live", "v"})
 _VIDEO_ID_LENGTH = 11
 _VIDEO_ID_CHARS = frozenset(string.ascii_letters + string.digits + "-_")
 
+# Real ids vary: PL…, UU…, RD…, OLAK5uy_…, and short ones like WL.
+_PLAYLIST_ID = re.compile(r"^[A-Za-z0-9_-]{2,100}$")
+
+# A Batch is capped by temp disk and the user's patience, not by YouTube.
+MAX_BATCH_ITEMS = 25
+
 
 class InvalidUrl(ValueError):
-    """The input is not a single YouTube video URL."""
+    """The input is not a YouTube video or playlist URL."""
 
 
 class UnknownPreset(ValueError):
     """The preset key does not exist in the ladder."""
+
+
+@dataclass(frozen=True)
+class VideoTarget:
+    video_id: str
+
+
+@dataclass(frozen=True)
+class PlaylistTarget:
+    playlist_id: str
+
+
+Target = VideoTarget | PlaylistTarget
 
 
 def watch_url(video_id: str) -> str:
@@ -42,25 +63,49 @@ def watch_url(video_id: str) -> str:
     return f"https://www.youtube.com/watch?v={video_id}"
 
 
+def playlist_url(playlist_id: str) -> str:
+    """Canonical playlist URL handed to yt-dlp."""
+    return f"https://www.youtube.com/playlist?list={playlist_id}"
+
+
 def _is_video_id(value: str) -> bool:
     return len(value) == _VIDEO_ID_LENGTH and set(value) <= _VIDEO_ID_CHARS
 
 
-def parse_video_url(raw: str) -> str:
-    """Return the 11-character video id, or raise :class:`InvalidUrl`."""
+def _as_url(text: str) -> str:
+    if "://" in text:
+        return text
+    if ":" in text.split("/")[0]:
+        # An opaque scheme such as javascript: or data: — never a real link.
+        return text
+    return f"https://{text}"
+
+
+def _video_id_from(parsed, host: str) -> str:
+    if host == "youtu.be":
+        return parsed.path.lstrip("/").split("/")[0]
+
+    video_id = parse_qs(parsed.query).get("v", [""])[0]
+    if video_id:
+        return video_id
+
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    if len(segments) >= 2 and segments[0] in _ID_SEGMENTS:
+        return segments[1]
+    return ""
+
+
+def parse_target(raw: str) -> Target:
+    """Decide what the user pasted: one video, or a playlist.
+
+    ``watch?v=…&list=…`` stays a :class:`VideoTarget` on purpose — a link copied
+    from a video page must never silently turn into a 25-item Batch.
+    """
     text = (raw or "").strip()
     if not text:
         raise InvalidUrl("Paste a YouTube link first.")
 
-    if "://" in text:
-        candidate = text
-    elif ":" in text.split("/")[0]:
-        # An opaque scheme such as javascript: or data: — never a real link.
-        candidate = text
-    else:
-        candidate = f"https://{text}"
-
-    parsed = urlparse(candidate)
+    parsed = urlparse(_as_url(text))
     if parsed.scheme not in {"http", "https"}:
         raise InvalidUrl("Only http and https links are supported.")
 
@@ -68,19 +113,24 @@ def parse_video_url(raw: str) -> str:
     if host not in ALLOWED_HOSTS:
         raise InvalidUrl("That is not a YouTube link.")
 
-    if host == "youtu.be":
-        video_id = parsed.path.lstrip("/").split("/")[0]
-    else:
-        video_id = parse_qs(parsed.query).get("v", [""])[0]
-        if not video_id:
-            segments = [segment for segment in parsed.path.split("/") if segment]
-            if len(segments) >= 2 and segments[0] in _ID_SEGMENTS:
-                video_id = segments[1]
+    if parsed.path.rstrip("/") == "/playlist":
+        playlist_id = parse_qs(parsed.query).get("list", [""])[0]
+        if not _PLAYLIST_ID.match(playlist_id):
+            raise InvalidUrl("That playlist link is missing a valid list id.")
+        return PlaylistTarget(playlist_id)
 
+    video_id = _video_id_from(parsed, host)
     if not _is_video_id(video_id):
         raise InvalidUrl("That link does not point at a single video.")
+    return VideoTarget(video_id)
 
-    return video_id
+
+def parse_video_url(raw: str) -> str:
+    """Return the 11-character video id, or raise :class:`InvalidUrl`."""
+    target = parse_target(raw)
+    if isinstance(target, PlaylistTarget):
+        raise InvalidUrl("That is a playlist link, not a single video.")
+    return target.video_id
 
 
 class PresetKind(str, Enum):
@@ -151,6 +201,63 @@ def build_preview(raw: RawPreview) -> Preview:
         thumbnail_url=raw.thumbnail_url,
         max_height=max(heights) if heights else None,
     )
+
+
+@dataclass(frozen=True)
+class RawPlaylistItem:
+    """One entry of a playlist, as reported by a flat extraction."""
+
+    video_id: str
+    title: str
+    duration_seconds: int | None
+
+
+@dataclass(frozen=True)
+class RawPlaylistPreview:
+    playlist_id: str
+    title: str
+    items: tuple[RawPlaylistItem, ...]
+
+
+@dataclass(frozen=True)
+class PlaylistPreview:
+    """A playlist shaped for the UI: the first page of items, and how many exist."""
+
+    playlist_id: str
+    title: str
+    items: tuple[RawPlaylistItem, ...]
+    total: int
+
+    @property
+    def truncated(self) -> bool:
+        return self.total > len(self.items)
+
+
+def build_playlist_preview(raw: RawPlaylistPreview) -> PlaylistPreview:
+    items = tuple(raw.items[:MAX_BATCH_ITEMS])
+    return PlaylistPreview(
+        playlist_id=raw.playlist_id,
+        title=raw.title or "Playlist",
+        items=items,
+        total=len(raw.items),
+    )
+
+
+def batch_items(items: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], ...]:
+    """Validate the items a Batch was asked to download.
+
+    Ids come back from the browser, so they are re-checked here even though the
+    Preview put them there: the form is not a trust boundary.
+    """
+    cleaned: list[tuple[str, str]] = []
+    for video_id, title in items:
+        if not _is_video_id(video_id):
+            raise InvalidUrl("That playlist contains a video we cannot download.")
+        cleaned.append((video_id, (title or video_id).strip()[:200] or video_id))
+
+    if not cleaned:
+        raise InvalidUrl("That playlist has no videos.")
+    return tuple(cleaned[:MAX_BATCH_ITEMS])
 
 
 def available_presets(preview: Preview) -> list[Preset]:
