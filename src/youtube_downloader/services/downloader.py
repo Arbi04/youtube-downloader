@@ -52,6 +52,9 @@ ProgressCallback = Callable[[Progress], None]
 CancelCheck = Callable[[], bool]
 
 
+# yt-dlp colourises its messages; users should never see the escape codes.
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
 # (code, message patterns matched against the lowercased exception text, advice)
 _ERROR_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
     (
@@ -66,6 +69,13 @@ _ERROR_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
         ),
         "YouTube wants proof this isn't a bot. Set YTDLP_COOKIES_FILE to a "
         "cookies.txt exported from a signed-in browser and try again.",
+    ),
+    (
+        "forbidden",
+        ("http error 403", "403: forbidden"),
+        "YouTube refused to send this video's data (HTTP 403). This is usually a "
+        "temporary block or an expired sign-in, not a broken link — try this video "
+        "again. If it keeps failing, export cookies.txt from a signed-in browser.",
     ),
     (
         "age_restricted",
@@ -92,6 +102,7 @@ _ERROR_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
         "unavailable",
         (
             "video unavailable",
+            "video is unavailable",
             "has been removed",
             "does not exist",
             "no longer available",
@@ -113,12 +124,13 @@ def map_error(exc: Exception) -> DownloadError:
     if isinstance(exc, DownloadError):
         return exc
 
-    text = str(exc).lower()
+    text = _ANSI_ESCAPE.sub("", str(exc)).lower()
     for code, patterns, message in _ERROR_RULES:
         if any(pattern in text for pattern in patterns):
             return DownloadError(code, message)
 
-    detail = str(exc).strip() or type(exc).__name__
+    detail = _ANSI_ESCAPE.sub("", str(exc)).strip() or type(exc).__name__
+    detail = re.sub(r"^ERROR:\s*", "", detail, flags=re.IGNORECASE)
     return DownloadError("unknown", f"Download failed: {detail}")
 
 

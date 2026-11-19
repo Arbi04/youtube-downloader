@@ -27,8 +27,14 @@ def downloader():
         ("ERROR: Private video. Sign in if you've been granted access", "private"),
         ("ERROR: The uploader has not made this video available in your country", "geo_blocked"),
         ("ERROR: Video unavailable", "unavailable"),
+        ("ERROR: [youtube] 00000000000: This video is unavailable", "unavailable"),
         ("ERROR: ffmpeg not found. Please install or provide the path", "ffmpeg_missing"),
         ("ERROR: Requested format is not available. Use --list-formats", "format_unavailable"),
+        (
+            "ERROR: \x1b[0;31mERROR:\x1b[0m unable to download video data: "
+            "HTTP Error 403: Forbidden",
+            "forbidden",
+        ),
         ("ERROR: something exploded", "unknown"),
     ],
 )
@@ -37,6 +43,17 @@ def test_map_error_translates_engine_failures(text, code):
 
     assert error.code == code
     assert error.message
+
+
+def test_map_error_strips_yt_dlp_colour_codes():
+    error = map_error(
+        RuntimeError("\x1b[0;31mERROR:\x1b[0m unable to download video data: HTTP Error 403")
+    )
+
+    assert "\x1b[" not in error.message
+    assert "[0;31m" not in error.message
+    assert "403" in error.message
+    assert "try this video again" in error.message
 
 
 def test_map_error_tells_the_user_how_to_fix_a_bot_check():
