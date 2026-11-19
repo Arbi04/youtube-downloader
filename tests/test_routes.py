@@ -1,3 +1,4 @@
+import html
 import io
 import json
 import re
@@ -185,6 +186,20 @@ def test_unknown_job_returns_404(client_factory):
 # --- Playlists and batches -------------------------------------------------
 
 
+def _hidden_items(page: str) -> str:
+    """Read the ``items`` field the way a browser would.
+
+    The value is HTML-escaped inside an attribute, so a test that builds the JSON
+    by hand would not notice a broken attribute — which is exactly how the
+    playlist form shipped broken once. Match either quote style.
+    """
+    match = re.search(
+        r'<input[^>]*name="items"[^>]*value=(?:"([^"]*)"|\'([^\']*)\')', page
+    )
+    assert match, "the playlist form has no items field"
+    return html.unescape(match.group(1) if match.group(1) is not None else match.group(2))
+
+
 def _start_batch(client, preset="mp3-192"):
     response = client.post(
         "/batches",
@@ -286,7 +301,31 @@ def test_a_batch_with_a_bad_video_id_is_refused(client_factory):
     )
 
     assert response.status_code == 200
-    assert "no longer valid" in response.text
+    assert "cannot download" in response.text
+    assert downloader.calls == []
+
+
+def test_the_rendered_playlist_form_starts_a_batch(client_factory):
+    """The browser posts the hidden field as rendered; no hand-built JSON.
+
+    Regression: ``tojson`` does not escape ``"``, so a double-quoted attribute
+    was truncated at the first key and the server received ``[[``.
+    """
+    client, downloader, _ = client_factory()
+
+    page = client.post("/preview", data={"url": PLAYLIST_URL}).text
+    items = _hidden_items(page)
+    assert json.loads(items) == BATCH_ITEMS
+
+    response = client.post(
+        "/batches",
+        data={"playlist_title": "Test playlist", "preset": "mp3-192", "items": items},
+    )
+
+    assert response.status_code == 200
+    assert "no longer valid" not in response.text
+    assert "First song" in response.text
+    assert 'hx-get="/batches/' in response.text
     assert downloader.calls == []
 
 
@@ -299,7 +338,7 @@ def test_a_batch_with_unreadable_items_is_refused(client_factory):
     )
 
     assert response.status_code == 200
-    assert "no longer valid" in response.text
+    assert "out of date" in response.text
 
 
 def test_cancelling_a_batch_shows_the_cancelled_state(client_factory):

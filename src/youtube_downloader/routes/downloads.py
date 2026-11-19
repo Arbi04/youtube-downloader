@@ -181,8 +181,13 @@ def start_batch(
 
     try:
         wanted = batch_items(_parse_items(items))
-    except (TypeError, ValueError):
-        return _error(request, "That playlist link is no longer valid. Check it again.")
+    except (TypeError, ValueError) as exc:
+        if isinstance(exc, InvalidUrl):
+            return _error(request, str(exc))
+        return _error(
+            request,
+            "This playlist form is out of date. Check the link again to rebuild it.",
+        )
 
     try:
         batch = request.app.state.registry.submit_batch(

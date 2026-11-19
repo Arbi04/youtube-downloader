@@ -25,7 +25,8 @@
     hx-swap="innerHTML"
   >
     <input type="hidden" name="playlist_title" value="{{ preview.title }}" />
-    <input type="hidden" name="items" value="{{ items | tojson }}" />
+    {# tojson escapes ' but not ", so this attribute must use single quotes. #}
+    <input type="hidden" name="items" value='{{ items | tojson }}' />
     {% for preset in presets %}
       <button class="preset" type="submit" name="preset" value="{{ preset.key }}">
         <span class="preset-label">{{ preset.label }}</span>
