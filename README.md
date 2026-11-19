@@ -79,6 +79,7 @@ and duration for each — with the same preset buttons.
 - **One item at a time.** A Batch takes one worker slot, so a 25-item playlist cannot starve the queue — or hammer YouTube with parallel requests that invite a bot check.
 - **One ZIP at the end.** Files are named `01 - Title [id].mp4` inside a folder named after the playlist, so the original order survives extraction.
 - **A broken video does not stop the batch.** Private, age-restricted, and geo-blocked items are reported in the list and left out of the archive. If every item fails, the Batch says so and offers no archive.
+- **Retry only what failed.** A finished Batch with failed items offers `Retry N failed items`. That starts a smaller Batch with the same preset and leaves a link to the earlier archive beside it, so twelve good files are never downloaded twice.
 - **`watch?v=…&list=…` is still one video.** Only a `/playlist` link starts a Batch, so a link copied from a video page never silently turns into 25 downloads.
 
 A 25-item video playlist can hold roughly 1 GB of temp files before the archive is

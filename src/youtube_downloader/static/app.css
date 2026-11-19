@@ -308,6 +308,11 @@ body {
   margin: 0 0 16px;
 }
 
+/* Retry sits beside the archive button, not stacked under it. */
+.job .btn + .btn {
+  margin-left: 12px;
+}
+
 .error {
   margin-top: 16px;
   padding: 14px 16px;

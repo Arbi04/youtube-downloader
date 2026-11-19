@@ -1,0 +1,11 @@
+<div class="batch-retry">
+  {% include "partials/batch.html" %}
+  {% if previous and previous.zip_path %}
+    {% set saved = previous.saved | length %}
+    <p class="job-note">
+      <a class="btn" href="/batches/{{ previous.id }}/zip">
+        Save the earlier archive ({{ saved }} {{ "file" if saved == 1 else "files" }})
+      </a>
+    </p>
+  {% endif %}
+</div>

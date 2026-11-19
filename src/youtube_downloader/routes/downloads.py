@@ -207,6 +207,40 @@ def batch_status(request: Request, batch_id: str) -> HTMLResponse:
     return _render_batch(request, batch)
 
 
+@router.post("/batches/{batch_id}/retry", response_class=HTMLResponse)
+def retry_batch(request: Request, batch_id: str) -> HTMLResponse:
+    """Queue the items that failed, as their own Batch.
+
+    A 403 is often transient, so the failures are worth one more try — but
+    retrying the whole playlist would download twelve files again for two.
+    """
+    registry = request.app.state.registry
+    source = registry.get_batch(batch_id)
+    if source is None:
+        return _error(request, "That batch is gone.", status_code=404)
+    if not source.finished:
+        return _error(
+            request,
+            "Wait for this playlist to finish before retrying.",
+            status_code=409,
+        )
+
+    wanted = [(job.video_id, job.title or job.video_id) for job in source.failed]
+    if not wanted:
+        return _error(request, "Every video in this playlist was saved.", status_code=409)
+
+    try:
+        batch = registry.submit_batch(source.playlist_title, wanted, source.preset)
+    except QueueFull as exc:
+        return _error(request, str(exc), status_code=429)
+
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "partials/batch_retry.html",
+        {"batch": batch, "previous": source},
+    )
+
+
 @router.post("/batches/{batch_id}/cancel", response_class=HTMLResponse)
 def cancel_batch(request: Request, batch_id: str) -> HTMLResponse:
     batch = request.app.state.registry.cancel_batch(batch_id)

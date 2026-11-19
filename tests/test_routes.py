@@ -357,3 +357,73 @@ def test_unknown_batch_returns_404(client_factory):
     client, _, _ = client_factory()
 
     assert client.get("/batches/deadbeef").status_code == 404
+
+
+# --- Retrying the items that failed ----------------------------------------
+
+
+class FailOnceDownloader(FakeDownloader):
+    """Fails one video the first time, then behaves like the fake."""
+
+    def __init__(self, video_id: str) -> None:
+        super().__init__()
+        self.fail_once = video_id
+
+    def download(self, video_id, preset, destination, on_progress, should_cancel):
+        if video_id == self.fail_once:
+            self.fail_once = None
+            self.calls.append((video_id, preset.key))
+            raise DownloadError("forbidden", "YouTube refused this video's data.")
+        return super().download(
+            video_id, preset, destination, on_progress, should_cancel
+        )
+
+
+def test_retrying_failed_items_queues_only_them(client_factory):
+    client, _, executor = client_factory(FailOnceDownloader("bbbbbbbbbbb"))
+    _, batch_id = _start_batch(client)
+    executor.run_next()
+
+    finished = client.get(f"/batches/{batch_id}")
+    assert "Save archive (2 files)" in finished.text
+    assert "Retry 1 failed item" in finished.text
+
+    retried = client.post(f"/batches/{batch_id}/retry")
+
+    assert retried.status_code == 200
+    assert "Second song" in retried.text
+    assert "First song" not in retried.text
+    assert "Third song" not in retried.text
+    assert "Save the earlier archive (2 files)" in retried.text
+
+    new_id = re.search(r'hx-get="/batches/([0-9a-f]+)"', retried.text).group(1)
+    executor.run_next()
+
+    assert "Save archive (1 file)" in client.get(f"/batches/{new_id}").text
+
+
+def test_retry_is_refused_when_nothing_failed(client_factory):
+    client, _, executor = client_factory()
+    _, batch_id = _start_batch(client)
+    executor.run_next()
+
+    response = client.post(f"/batches/{batch_id}/retry")
+
+    assert response.status_code == 409
+    assert "Every video" in response.text
+
+
+def test_retry_is_refused_while_the_batch_runs(client_factory):
+    client, _, _ = client_factory()
+    _, batch_id = _start_batch(client)
+
+    response = client.post(f"/batches/{batch_id}/retry")
+
+    assert response.status_code == 409
+    assert "Wait for this playlist" in response.text
+
+
+def test_retrying_an_unknown_batch_returns_404(client_factory):
+    client, _, _ = client_factory()
+
+    assert client.post("/batches/deadbeef/retry").status_code == 404

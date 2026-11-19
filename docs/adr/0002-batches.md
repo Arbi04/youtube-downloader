@@ -10,6 +10,7 @@ A **Batch** downloads every video in a playlist under a single Preset and delive
 - **A failing item does not stop the Batch.** Private, age-restricted, and geo-blocked videos are common in real playlists, so the Batch records a per-item failure and continues. If *every* item fails, the Batch is `failed` and no archive is offered.
 - **Presets are offered unconditionally for playlists.** Deciding availability up front would cost one metadata request per item, making a 25-item Preview slower than the download itself. The format selector already caps height per item.
 - **25 items maximum**, truncated from the front. The limit is about temp disk and the user's patience, not about YouTube.
+- **A finished Batch can retry only its failed items.** The retry starts a new, smaller Batch with the same preset and leaves the earlier archive downloadable, so a transient 403 on two items does not re-download twenty.
 - **`/playlist?list=` only.** `watch?v=…&list=…` stays a single video, so a link copied from a video page never silently turns into 25 downloads.
 
 ## Consequences
