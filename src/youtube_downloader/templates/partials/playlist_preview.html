@@ -1,0 +1,41 @@
+<section class="preview">
+  <div class="preview-head">
+    <div class="preview-text">
+      <h2 class="preview-title">{{ preview.title }}</h2>
+      <p class="preview-meta">
+        {{ preview.items | length }} videos{% if preview.truncated %} &middot; first
+        {{ preview.items | length }} of {{ preview.total }}{% endif %}
+      </p>
+    </div>
+  </div>
+
+  <ol class="batch-preview">
+    {% for item in preview.items %}
+      <li>
+        <span class="batch-preview-name">{{ item.title }}</span>
+        <span class="batch-preview-meta">{{ item.duration_seconds | duration }}</span>
+      </li>
+    {% endfor %}
+  </ol>
+
+  <form
+    class="preset-grid"
+    hx-post="/batches"
+    hx-target="#job-slot"
+    hx-swap="innerHTML"
+  >
+    <input type="hidden" name="playlist_title" value="{{ preview.title }}" />
+    <input type="hidden" name="items" value="{{ items | tojson }}" />
+    {% for preset in presets %}
+      <button class="preset" type="submit" name="preset" value="{{ preset.key }}">
+        <span class="preset-label">{{ preset.label }}</span>
+      </button>
+    {% endfor %}
+  </form>
+
+  <p class="hint">
+    Downloads run one after another, then arrive as a single ZIP.
+    {% if preview.truncated %}Only the first {{ preview.items | length }} videos are
+    included.{% endif %}
+  </p>
+</section>

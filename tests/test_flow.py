@@ -1,13 +1,16 @@
 """End-to-end journey through the real app, wired to fakes."""
 
+import io
+import json
 import os
 import re
 import time
+import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
 
-from fakes import FakeDownloader, ManualExecutor
+from fakes import PLAYLIST_ID, FakeDownloader, ManualExecutor
 from youtube_downloader.app import create_app
 from youtube_downloader.config import Settings
 from youtube_downloader.services.youtube import RawPreview
@@ -112,3 +115,48 @@ def test_invalid_url_never_starts_a_job(tmp_path):
 
     assert "not a YouTube link" in response.text
     assert downloader.calls == []
+
+def test_playlist_preview_then_one_archive(tmp_path):
+    client, executor, _ = build_client(tmp_path)
+
+    preview = client.post(
+        "/preview",
+        data={"url": f"https://www.youtube.com/playlist?list={PLAYLIST_ID}"},
+    )
+    assert "Test playlist" in preview.text
+
+    started = client.post(
+        "/batches",
+        data={
+            "playlist_title": "Test playlist",
+            "preset": "mp3-192",
+            "items": json.dumps(
+                [["aaaaaaaaaaa", "First song"], ["bbbbbbbbbbb", "Second song"]]
+            ),
+        },
+    )
+    batch_id = re.search(r'hx-get="/batches/([0-9a-f]+)"', started.text).group(1)
+
+    executor.run_next()
+
+    archive = client.get(f"/batches/{batch_id}/zip")
+    assert archive.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
+        assert bundle.namelist() == [
+            "Test playlist/01 - file.mp3",
+            "Test playlist/02 - file.mp3",
+        ]
+
+    assert client.get(f"/batches/{batch_id}/zip").status_code == 404
+
+
+def test_a_playlist_url_does_not_start_a_single_download(tmp_path):
+    client, _, downloader = build_client(tmp_path)
+
+    response = client.post(
+        "/preview",
+        data={"url": f"https://www.youtube.com/playlist?list={PLAYLIST_ID}"},
+    )
+
+    assert downloader.calls == []
+    assert 'hx-post="/batches"' in response.text

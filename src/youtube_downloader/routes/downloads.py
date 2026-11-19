@@ -1,6 +1,8 @@
-"""HTMX endpoints: Preview, Job lifecycle, and file delivery."""
+"""HTMX endpoints: Preview, Job and Batch lifecycle, and file delivery."""
 
 from __future__ import annotations
+
+import json
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, Response
@@ -8,13 +10,17 @@ from starlette.background import BackgroundTask
 from starlette.responses import FileResponse
 
 from youtube_downloader.services.downloader import DownloadError
-from youtube_downloader.services.jobs import Job, QueueFull
+from youtube_downloader.services.jobs import Batch, Job, QueueFull
 from youtube_downloader.services.youtube import (
+    PRESETS,
     InvalidUrl,
+    PlaylistTarget,
     UnknownPreset,
     available_presets,
+    batch_items,
+    build_playlist_preview,
     build_preview,
-    parse_video_url,
+    parse_target,
     preset_by_key,
 )
 
@@ -36,11 +42,36 @@ def _render_job(request: Request, job: Job) -> HTMLResponse:
     )
 
 
+def _render_batch(request: Request, batch: Batch) -> HTMLResponse:
+    return request.app.state.templates.TemplateResponse(
+        request, "partials/batch.html", {"batch": batch}
+    )
+
+
+def _playlist_partial(request: Request, target: PlaylistTarget) -> HTMLResponse:
+    raw = request.app.state.downloader.playlist_preview(target.playlist_id)
+    shape = build_playlist_preview(raw)
+    if not shape.items:
+        return _error(request, "That playlist has no videos we can download.")
+
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "partials/playlist_preview.html",
+        {
+            "preview": shape,
+            "presets": PRESETS,
+            "items": [[item.video_id, item.title] for item in shape.items],
+        },
+    )
+
+
 @router.post("/preview", response_class=HTMLResponse)
 def preview(request: Request, url: str = Form("")) -> HTMLResponse:
     try:
-        video_id = parse_video_url(url)
-        raw = request.app.state.downloader.preview(video_id)
+        target = parse_target(url)
+        if isinstance(target, PlaylistTarget):
+            return _playlist_partial(request, target)
+        raw = request.app.state.downloader.preview(target.video_id)
     except InvalidUrl as exc:
         return _error(request, str(exc))
     except DownloadError as exc:
@@ -113,3 +144,83 @@ def job_file(request: Request, job_id: str) -> Response:
         filename=job.file_path.name,
         background=BackgroundTask(registry.discard_files, job),
     )
+
+
+def _parse_items(raw: str) -> list[tuple[str, str]]:
+    """Read the item pairs the Preview form posted back.
+
+    The form is not a trust boundary, so this only checks shape; ``batch_items``
+    re-validates every video id.
+    """
+    payload = json.loads(raw)
+    if not isinstance(payload, list):
+        raise TypeError("items must be a list")
+
+    pairs: list[tuple[str, str]] = []
+    for entry in payload:
+        if not isinstance(entry, list) or len(entry) != 2:
+            raise TypeError("each item must be a [video_id, title] pair")
+        video_id, title = entry
+        if not isinstance(video_id, str) or not isinstance(title, str):
+            raise TypeError("each item must be a [video_id, title] pair")
+        pairs.append((video_id, title))
+    return pairs
+
+
+@router.post("/batches", response_class=HTMLResponse)
+def start_batch(
+    request: Request,
+    playlist_title: str = Form("Playlist"),
+    preset: str = Form(...),
+    items: str = Form("[]"),
+) -> HTMLResponse:
+    try:
+        chosen = preset_by_key(preset)
+    except UnknownPreset:
+        return _error(request, "That format is not available.", status_code=400)
+
+    try:
+        wanted = batch_items(_parse_items(items))
+    except (TypeError, ValueError):
+        return _error(request, "That playlist link is no longer valid. Check it again.")
+
+    try:
+        batch = request.app.state.registry.submit_batch(
+            playlist_title, wanted, chosen
+        )
+    except QueueFull as exc:
+        return _error(request, str(exc), status_code=429)
+
+    return _render_batch(request, batch)
+
+
+@router.get("/batches/{batch_id}", response_class=HTMLResponse)
+def batch_status(request: Request, batch_id: str) -> HTMLResponse:
+    batch = request.app.state.registry.get_batch(batch_id)
+    if batch is None:
+        return _error(request, "That batch is gone.", status_code=404)
+    return _render_batch(request, batch)
+
+
+@router.post("/batches/{batch_id}/cancel", response_class=HTMLResponse)
+def cancel_batch(request: Request, batch_id: str) -> HTMLResponse:
+    batch = request.app.state.registry.cancel_batch(batch_id)
+    if batch is None:
+        return _error(request, "That batch is gone.", status_code=404)
+    return _render_batch(request, batch)
+
+
+@router.get("/batches/{batch_id}/zip")
+def batch_zip(request: Request, batch_id: str) -> Response:
+    registry = request.app.state.registry
+    batch = registry.get_batch(batch_id)
+    if batch is None or batch.zip_path is None or not batch.zip_path.exists():
+        return HTMLResponse("That archive is no longer available.", status_code=404)
+
+    return FileResponse(
+        batch.zip_path,
+        media_type="application/zip",
+        filename=batch.zip_path.name,
+        background=BackgroundTask(registry.discard_batch, batch),
+    )
+

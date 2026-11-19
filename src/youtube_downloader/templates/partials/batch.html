@@ -1,0 +1,72 @@
+<div
+  id="job"
+  class="card job"
+  {% if not batch.finished %}
+    hx-get="/batches/{{ batch.id }}"
+    hx-trigger="every 1s"
+    hx-swap="outerHTML"
+  {% endif %}
+>
+  <div class="job-head">
+    <span class="pill">{{ batch.preset.label }}</span>
+    <span class="job-state">{{ batch.state.value }}</span>
+  </div>
+
+  <p class="job-note">
+    <strong>{{ batch.playlist_title }}</strong> &mdash;
+    {{ batch.saved | length }} of {{ batch.items | length }} saved
+  </p>
+
+  {% if not batch.finished %}
+    <div
+      class="bar"
+      role="progressbar"
+      aria-valuenow="{{ batch.progress }}"
+      aria-valuemin="0"
+      aria-valuemax="100"
+    >
+      <div class="bar-fill" style="width: {{ batch.progress }}%"></div>
+    </div>
+    <p class="job-meta">
+      <strong>{{ "%.0f" | format(batch.progress) }}%</strong> of the playlist
+    </p>
+  {% endif %}
+
+  <ol class="batch-list">
+    {% for item in batch.items %}
+      <li class="batch-row batch-row-{{ item.state.value }}">
+        <span class="batch-index">{{ "%02d" | format(loop.index) }}</span>
+        <span class="batch-name">{{ item.title or item.video_id }}</span>
+        <span class="batch-state">
+          {% if item.state.value == "running" %}{{ "%.0f" | format(item.progress) }}%
+          {% elif item.state.value == "done" %}saved
+          {% else %}{{ item.state.value }}{% endif %}
+        </span>
+        {% if item.error %}
+          <span class="batch-reason">{{ item.error.message }}</span>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ol>
+
+  {% if batch.state.value == "cancelled" %}
+    <p class="job-note">Cancelled. Nothing was saved.</p>
+  {% elif batch.state.value == "failed" %}
+    <div class="error" role="alert">
+      Every video in this playlist failed. Nothing was saved.
+    </div>
+  {% elif batch.zip_path %}
+    <a class="btn btn-primary" href="/batches/{{ batch.id }}/zip">
+      Save archive ({{ batch.saved | length }} files)
+    </a>
+  {% else %}
+    <button
+      class="btn btn-danger"
+      hx-post="/batches/{{ batch.id }}/cancel"
+      hx-target="#job"
+      hx-swap="outerHTML"
+    >
+      Cancel
+    </button>
+  {% endif %}
+</div>

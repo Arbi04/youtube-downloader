@@ -1,6 +1,6 @@
 # YouTube Downloader
 
-A local web app that turns a YouTube link into a file you can actually play: pick a resolution or an MP3 bitrate, watch the progress bar, save the file. One user, one video at a time, no accounts, no database.
+A local web app that turns a YouTube link — a video or a playlist — into files you can actually play: pick a resolution or an MP3 bitrate, watch the progress bar, save the result. One user, one download at a time, no accounts, no database.
 
 <p align="center">
   <img
@@ -46,6 +46,10 @@ request and only thumbnails come back.
 2. Pick a preset. A **Job** starts in the background and the page polls its progress once a second.
 3. When the job finishes, **Save file** hands you the file and the server deletes its temporary copy.
 
+A playlist takes the same three steps, with one difference: the Preview lists the
+items and starting it creates a **Batch** that downloads them one after another,
+then hands you a single ZIP.
+
 <p align="center">
   <img
     src="docs/screenshot_preview_progress_bar.png"
@@ -64,6 +68,21 @@ job is.
 | `mp3-192` | MP3 at 192 kbps with ID3 tags and the thumbnail embedded as cover art. |
 
 Presets taller than the source video stay visible but disabled, labelled `max 720p`, so you can see the limit instead of guessing why a button is missing.
+
+## Playlists
+
+Paste a `youtube.com/playlist?list=…` link and the Preview lists the items — title
+and duration for each — with the same preset buttons.
+
+- **One preset for the whole playlist.** Changing your mind means starting again; there is no per-item picker.
+- **25 videos maximum**, taken from the front of the playlist. The Preview tells you when it truncated.
+- **One item at a time.** A Batch takes one worker slot, so a 25-item playlist cannot starve the queue — or hammer YouTube with parallel requests that invite a bot check.
+- **One ZIP at the end.** Files are named `01 - Title [id].mp4` inside a folder named after the playlist, so the original order survives extraction.
+- **A broken video does not stop the batch.** Private, age-restricted, and geo-blocked items are reported in the list and left out of the archive. If every item fails, the Batch says so and offers no archive.
+- **`watch?v=…&list=…` is still one video.** Only a `/playlist` link starts a Batch, so a link copied from a video page never silently turns into 25 downloads.
+
+A 25-item video playlist can hold roughly 1 GB of temp files before the archive is
+built, so expect the disk to fill and clear as it runs.
 
 ## Configuration
 
@@ -108,9 +127,9 @@ Install Node.js (or Deno) and restart; the app detects it automatically.
 
 ## Known limitations
 
-- **No playlists or channels** — one video per link, by design.
+- **No channels** — a channel URL is not a playlist. Playlists are capped at 25 videos, all with one preset.
 - **No history and no database** — job state is in memory, so a restart drops whatever was in flight.
-- **Files are temporary** — the server deletes its copy after the browser has the file, and sweeps leftovers older than two hours at startup.
+- **Files are temporary** — the server deletes its copy after the browser has the file, and sweeps leftovers older than two hours at startup. A Batch archive is deleted the same way, which means it is gone once you have downloaded it.
 - **Not multi-user** — no auth, no per-user quotas.
 - **YouTube moves constantly** — when downloads start failing after a YouTube change, upgrade the engine: `uv lock --upgrade-package yt-dlp && uv sync`.
 - **Signed-in requests need a JS runtime** — see [Cookies need a JavaScript runtime](#cookies-need-a-javascript-runtime). This is a yt-dlp requirement, not a choice this app makes.
@@ -126,20 +145,21 @@ The suite is offline: `yt-dlp` is replaced by a fake behind the `Downloader` pro
 ## Architecture
 
 ```
-routes/            HTMX endpoints: preview, job lifecycle, file delivery
-services/jobs.py   in-memory registry, bounded queue, cancel, timeout, sweep
+routes/            HTMX endpoints: preview, job and batch lifecycle, file delivery
+services/jobs.py   in-memory registry, batch runner, archive builder, queue, cancel, sweep
 services/downloader.py   the only module that imports yt_dlp
-services/youtube.py      URL allowlist, Preview, Preset, format selectors
+services/youtube.py      URL allowlist, Preview, Preset, Batch items, format selectors
 templates/         Jinja2 + HTMX fragments, no build step
 static/            hand-written CSS, vendored htmx
 ```
 
-Two decisions are worth knowing before reading the code:
+Three decisions are worth knowing before reading the code:
 
 - **Jobs run in-process.** No Redis, no Celery, no database — see [`docs/adr/0001-in-process-jobs.md`](docs/adr/0001-in-process-jobs.md). The consequence is that cancellation is cooperative: Python cannot kill a thread, so the worker checks a flag on each progress hook.
+- **A Batch is one worker slot, not one Job per item** — see [`docs/adr/0002-batches.md`](docs/adr/0002-batches.md). Items run sequentially and produce a single archive.
 - **`services/downloader.py` is the only yt-dlp import.** Everything else talks to the `Downloader` protocol. That seam is what keeps the suite offline and what would make swapping engines a local change.
 
-Vocabulary lives in [`GLOSSARY.md`](GLOSSARY.md): **Preview**, **Preset**, **Job**.
+Vocabulary lives in [`GLOSSARY.md`](GLOSSARY.md): **Preview**, **Preset**, **Job**, **Batch**, **Playlist**.
 
 ## Legal
 

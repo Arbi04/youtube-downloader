@@ -1,15 +1,25 @@
+import io
+import json
 import re
+import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
 
-from fakes import FakeDownloader, ManualExecutor
+from fakes import PLAYLIST_ID, FakeDownloader, ManualExecutor
 from youtube_downloader.app import create_app
 from youtube_downloader.config import Settings
 from youtube_downloader.services.downloader import DownloadError
 
 VIDEO_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 VIDEO_ID = "dQw4w9WgXcQ"
+PLAYLIST_URL = f"https://www.youtube.com/playlist?list={PLAYLIST_ID}"
+
+BATCH_ITEMS = [
+    ["aaaaaaaaaaa", "First song"],
+    ["bbbbbbbbbbb", "Second song"],
+    ["ccccccccccc", "Third song"],
+]
 
 
 @pytest.fixture
@@ -171,3 +181,140 @@ def test_unknown_job_returns_404(client_factory):
     client, _, _ = client_factory()
 
     assert client.get("/jobs/deadbeef").status_code == 404
+
+# --- Playlists and batches -------------------------------------------------
+
+
+def _start_batch(client, preset="mp3-192"):
+    response = client.post(
+        "/batches",
+        data={
+            "playlist_title": "Test playlist",
+            "preset": preset,
+            "items": json.dumps(BATCH_ITEMS),
+        },
+    )
+    match = re.search(r'hx-get="/batches/([0-9a-f]+)"', response.text)
+    return response, (match.group(1) if match else None)
+
+
+def test_playlist_preview_lists_items_and_offers_every_preset(client_factory):
+    client, downloader, _ = client_factory()
+
+    response = client.post("/preview", data={"url": PLAYLIST_URL})
+
+    assert response.status_code == 200
+    assert "Test playlist" in response.text
+    assert "3 videos" in response.text
+    assert "First song" in response.text
+    assert "Third song" in response.text
+    assert downloader.playlist_calls == [PLAYLIST_ID]
+    assert "disabled" not in response.text
+
+
+def test_starting_a_batch_renders_a_polling_checklist(client_factory):
+    client, downloader, _ = client_factory()
+
+    response, batch_id = _start_batch(client)
+
+    assert response.status_code == 200
+    assert batch_id is not None
+    assert 'hx-trigger="every 1s"' in response.text
+    assert "First song" in response.text
+    assert "Cancel" in response.text
+    assert downloader.calls == []
+
+
+def test_finished_batch_offers_the_archive_and_stops_polling(client_factory):
+    client, _, executor = client_factory()
+    _, batch_id = _start_batch(client)
+
+    executor.run_next()
+    response = client.get(f"/batches/{batch_id}")
+
+    assert "Save archive (3 files)" in response.text
+    assert "hx-trigger" not in response.text
+
+
+def test_archive_is_a_zip_with_the_items_in_order(client_factory):
+    client, _, executor = client_factory()
+    _, batch_id = _start_batch(client)
+    executor.run_next()
+
+    response = client.get(f"/batches/{batch_id}/zip")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(io.BytesIO(response.content)) as bundle:
+        assert bundle.namelist() == [
+            "Test playlist/01 - file.mp3",
+            "Test playlist/02 - file.mp3",
+            "Test playlist/03 - file.mp3",
+        ]
+
+
+def test_archive_is_served_once_then_removed(client_factory):
+    client, _, executor = client_factory()
+    _, batch_id = _start_batch(client)
+    executor.run_next()
+
+    assert client.get(f"/batches/{batch_id}/zip").status_code == 200
+    assert client.get(f"/batches/{batch_id}/zip").status_code == 404
+
+
+def test_a_full_queue_refuses_a_batch(client_factory):
+    client, _, _ = client_factory(max_concurrent=1, max_queued=0)
+
+    first, _ = _start_batch(client)
+    second, _ = _start_batch(client)
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert "Too many downloads" in second.text
+
+
+def test_a_batch_with_a_bad_video_id_is_refused(client_factory):
+    client, downloader, _ = client_factory()
+
+    response = client.post(
+        "/batches",
+        data={
+            "playlist_title": "Test playlist",
+            "preset": "mp3-192",
+            "items": json.dumps([["short", "A song"]]),
+        },
+    )
+
+    assert response.status_code == 200
+    assert "no longer valid" in response.text
+    assert downloader.calls == []
+
+
+def test_a_batch_with_unreadable_items_is_refused(client_factory):
+    client, _, _ = client_factory()
+
+    response = client.post(
+        "/batches",
+        data={"playlist_title": "x", "preset": "mp3-192", "items": "not json"},
+    )
+
+    assert response.status_code == 200
+    assert "no longer valid" in response.text
+
+
+def test_cancelling_a_batch_shows_the_cancelled_state(client_factory):
+    client, downloader, executor = client_factory()
+    _, batch_id = _start_batch(client)
+
+    cancelled = client.post(f"/batches/{batch_id}/cancel")
+    executor.run_next()
+
+    assert "Cancelled" in cancelled.text
+    assert downloader.calls == []
+    assert "Cancelled" in client.get(f"/batches/{batch_id}").text
+
+
+def test_unknown_batch_returns_404(client_factory):
+    client, _, _ = client_factory()
+
+    assert client.get("/batches/deadbeef").status_code == 404
