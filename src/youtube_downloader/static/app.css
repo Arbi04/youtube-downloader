@@ -92,11 +92,15 @@ body {
 /* Buttons read as physical blocks: pressing moves them into their own shadow. */
 
 .btn {
+  /* Buttons and links share this class; an <a> is inline by default, which
+     lets its padding overlap whatever sits above it. */
+  display: inline-block;
   padding: 14px 22px;
   font-family: var(--font-heavy);
   font-size: 0.9rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  text-decoration: none;
   color: var(--ink);
   background: var(--paper);
   border: var(--border);
@@ -311,6 +315,12 @@ body {
 /* Retry sits beside the archive button, not stacked under it. */
 .job .btn + .btn {
   margin-left: 12px;
+}
+
+/* The earlier archive belongs to the previous batch, so it lives outside the
+   new card — but it still needs air between it and the card's border. */
+.batch-retry > .job-note {
+  margin: 16px 0 0;
 }
 
 .error {
