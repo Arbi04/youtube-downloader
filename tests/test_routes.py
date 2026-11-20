@@ -33,7 +33,12 @@ def client_factory(tmp_path):
         )
         downloader = downloader or FakeDownloader()
         executor = ManualExecutor()
-        app = create_app(settings=settings, downloader=downloader, executor=executor)
+        app = create_app(
+            settings=settings,
+            downloader=downloader,
+            executor=executor,
+            sleep=lambda seconds: None,
+        )
         return TestClient(app), downloader, executor
 
     return build
@@ -363,43 +368,50 @@ def test_unknown_batch_returns_404(client_factory):
 
 
 class FailOnceDownloader(FakeDownloader):
-    """Fails one video the first time, then behaves like the fake."""
+    """Fails one video until the test asks it to recover."""
 
     def __init__(self, video_id: str) -> None:
         super().__init__()
-        self.fail_once = video_id
+        self.failing = video_id
 
     def download(self, video_id, preset, destination, on_progress, should_cancel):
-        if video_id == self.fail_once:
-            self.fail_once = None
+        if video_id == self.failing:
             self.calls.append((video_id, preset.key))
-            raise DownloadError("forbidden", "YouTube refused this video's data.")
+            raise DownloadError("private", "This video is private.")
         return super().download(
             video_id, preset, destination, on_progress, should_cancel
         )
 
 
-def test_retrying_failed_items_queues_only_them(client_factory):
-    client, _, executor = client_factory(FailOnceDownloader("bbbbbbbbbbb"))
+def test_retrying_failed_items_continues_the_same_batch(client_factory):
+    downloader = FailOnceDownloader("bbbbbbbbbbb")
+    client, _, executor = client_factory(downloader)
     _, batch_id = _start_batch(client)
     executor.run_next()
 
     finished = client.get(f"/batches/{batch_id}")
+    assert "2 of 3 saved" in finished.text
     assert "Save archive (2 files)" in finished.text
     assert "Retry 1 failed item" in finished.text
 
+    downloader.failing = None
     retried = client.post(f"/batches/{batch_id}/retry")
 
     assert retried.status_code == 200
-    assert "Second song" in retried.text
-    assert "First song" not in retried.text
-    assert "Third song" not in retried.text
-    assert "Save the earlier archive (2 files)" in retried.text
+    # Same Batch and same counter; the archive is rebuilt, so no stale link.
+    assert f'/batches/{batch_id}/zip' not in retried.text
+    assert "2 of 3 saved" in retried.text
+    assert "First song" in retried.text
+    assert "Third song" in retried.text
+    assert "Save the earlier archive" not in retried.text
 
-    new_id = re.search(r'hx-get="/batches/([0-9a-f]+)"', retried.text).group(1)
     executor.run_next()
+    done = client.get(f"/batches/{batch_id}")
 
-    assert "Save archive (1 file)" in client.get(f"/batches/{new_id}").text
+    assert "3 of 3 saved" in done.text
+    assert done.text.count("Save archive (3 files)") == 1
+    assert "Retry" not in done.text
+    assert "Save the earlier archive" not in done.text
 
 
 def test_retry_is_refused_when_nothing_failed(client_factory):

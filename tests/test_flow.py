@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from fakes import PLAYLIST_ID, FakeDownloader, ManualExecutor
 from youtube_downloader.app import create_app
 from youtube_downloader.config import Settings
+from youtube_downloader.services.downloader import DownloadError
 from youtube_downloader.services.youtube import RawPreview
 
 VIDEO_ID = "dQw4w9WgXcQ"
@@ -29,7 +30,12 @@ def build_client(tmp_path, downloader=None, **overrides):
     downloader = downloader or FakeDownloader()
     executor = ManualExecutor()
     return TestClient(
-        create_app(settings=settings, downloader=downloader, executor=executor)
+        create_app(
+            settings=settings,
+            downloader=downloader,
+            executor=executor,
+            sleep=lambda seconds: None,
+        )
     ), executor, downloader
 
 
@@ -148,6 +154,69 @@ def test_playlist_preview_then_one_archive(tmp_path):
         ]
 
     assert client.get(f"/batches/{batch_id}/zip").status_code == 404
+
+
+class FailFirstItem(FakeDownloader):
+    """Fails one playlist item once, so the first pass needs a manual retry."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failing = "bbbbbbbbbbb"
+
+    def download(self, video_id, preset, destination, on_progress, should_cancel):
+        if video_id == self.failing:
+            self.failing = None
+            self.calls.append((video_id, preset.key))
+            raise DownloadError("private", "This video is private.")
+        return super().download(
+            video_id, preset, destination, on_progress, should_cancel
+        )
+
+
+def test_playlist_retry_ends_with_one_archive(tmp_path):
+    downloader = FailFirstItem()
+    client, executor, _ = build_client(tmp_path, downloader=downloader)
+
+    started = client.post(
+        "/batches",
+        data={
+            "playlist_title": "Test playlist",
+            "preset": "mp3-192",
+            "items": json.dumps(
+                [
+                    ["aaaaaaaaaaa", "First song"],
+                    ["bbbbbbbbbbb", "Second song"],
+                    ["ccccccccccc", "Third song"],
+                ]
+            ),
+        },
+    )
+    batch_id = re.search(r'hx-get="/batches/([0-9a-f]+)"', started.text).group(1)
+    executor.run_next()
+
+    first_pass = client.get(f"/batches/{batch_id}")
+    assert "2 of 3 saved" in first_pass.text
+    assert "Save archive (2 files)" in first_pass.text
+    assert "Retry 1 failed item" in first_pass.text
+
+    retried = client.post(f"/batches/{batch_id}/retry")
+    assert retried.status_code == 200
+    assert "2 of 3 saved" in retried.text
+    assert "Earlier archive" not in retried.text
+
+    executor.run_next()
+
+    done = client.get(f"/batches/{batch_id}")
+    assert "3 of 3 saved" in done.text
+    assert done.text.count("Save archive (3 files)") == 1
+
+    archive = client.get(f"/batches/{batch_id}/zip")
+    with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
+        assert bundle.namelist() == [
+            "Test playlist/01 - file.mp3",
+            "Test playlist/02 - file.mp3",
+            "Test playlist/03 - file.mp3",
+        ]
 
 
 def test_a_playlist_url_does_not_start_a_single_download(tmp_path):

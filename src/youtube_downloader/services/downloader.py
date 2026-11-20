@@ -78,6 +78,42 @@ _ERROR_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
         "again. If it keeps failing, export cookies.txt from a signed-in browser.",
     ),
     (
+        "rate_limited",
+        (
+            "http error 429",
+            "429: too many requests",
+            "too many requests",
+            "rate limit",
+            "ratelimit",
+        ),
+        "YouTube is rate-limiting this machine (HTTP 429). Wait a minute before "
+        "trying again; a cookies.txt from a signed-in browser also helps.",
+    ),
+    (
+        "network",
+        (
+            "http error 500",
+            "http error 502",
+            "http error 503",
+            "http error 504",
+            "connection reset",
+            "connection aborted",
+            "connection refused",
+            "connection error",
+            "remote end closed",
+            "incompleteread",
+            "timed out",
+            "timeout",
+            "temporary failure",
+            "name or service not known",
+            "getaddrinfo failed",
+            "network is unreachable",
+            "unable to download webpage",
+        ),
+        "The connection to YouTube failed. Check your internet connection and "
+        "try again — this is usually temporary.",
+    ),
+    (
         "age_restricted",
         ("age-restricted", "age restricted", "confirm your age", "inappropriate for some users"),
         "This video is age-restricted. A cookies.txt from a signed-in browser is required.",

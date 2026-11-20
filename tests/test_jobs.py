@@ -8,7 +8,13 @@ import pytest
 from fakes import FakeDownloader, ManualExecutor
 from youtube_downloader.config import Settings
 from youtube_downloader.services.downloader import DownloadError, JobCancelled
-from youtube_downloader.services.jobs import JobRegistry, JobState, QueueFull
+from youtube_downloader.services.jobs import (
+    ITEM_GAP_SECONDS,
+    JobRegistry,
+    JobState,
+    QueueFull,
+    RetryUnavailable,
+)
 from youtube_downloader.services.youtube import preset_by_key
 
 ITEMS = [
@@ -28,9 +34,13 @@ def executor():
     return ManualExecutor()
 
 
-def make_registry(settings, executor, downloader=None, clock=time.monotonic):
+def make_registry(settings, executor, downloader=None, clock=time.monotonic, sleep=None):
     return JobRegistry(
-        downloader or FakeDownloader(), settings, executor=executor, clock=clock
+        downloader or FakeDownloader(),
+        settings,
+        executor=executor,
+        clock=clock,
+        sleep=sleep or (lambda seconds: None),
     )
 
 
@@ -313,3 +323,209 @@ def test_archive_folder_is_safe_for_windows(settings, executor):
     assert batch.zip_path.name == "AC-DC- Live-.zip"
     with zipfile.ZipFile(batch.zip_path) as bundle:
         assert bundle.namelist() == ["AC-DC- Live-/01 - file.mp3"]
+
+
+# --- Retrying inside the same Batch ----------------------------------------
+
+
+class FlakyDownloader(FakeDownloader):
+    """Fails one video a given number of times, then behaves like the fake."""
+
+    def __init__(self, video_id: str, failures: int, code: str = "forbidden") -> None:
+        super().__init__()
+        self.video_id = video_id
+        self.remaining = failures
+        self.code = code
+
+    def download(self, video_id, preset, destination, on_progress, should_cancel):
+        if video_id == self.video_id and self.remaining:
+            self.remaining -= 1
+            self.calls.append((video_id, preset.key))
+            raise DownloadError(self.code, "A temporary refusal.")
+        return super().download(
+            video_id, preset, destination, on_progress, should_cancel
+        )
+
+
+def test_retry_reruns_only_failed_items_in_the_same_batch(settings, executor):
+    downloader = FlakyDownloader("bbbbbbbbbbb", failures=1, code="private")
+    registry = make_registry(settings, executor, downloader)
+
+    batch = registry.submit_batch("A list", ITEMS, preset_by_key("mp3-192"))
+    executor.run_next()
+
+    assert [job.state for job in batch.items] == [
+        JobState.DONE,
+        JobState.FAILED,
+        JobState.DONE,
+    ]
+
+    retried = registry.retry_batch(batch.id)
+
+    assert retried is batch
+    assert registry.get_batch(batch.id) is batch
+    assert [job.state for job in batch.items] == [
+        JobState.DONE,
+        JobState.QUEUED,
+        JobState.DONE,
+    ]
+    assert batch.state == JobState.QUEUED
+    assert batch.zip_path is None
+    assert [call[0] for call in downloader.calls] == [
+        "aaaaaaaaaaa",
+        "bbbbbbbbbbb",
+        "ccccccccccc",
+    ]
+
+    executor.run_next()
+
+    assert [job.state for job in batch.items] == [JobState.DONE] * 3
+    assert batch.state == JobState.DONE
+    # The item keeps its original position, so the archive has all three files.
+    with zipfile.ZipFile(batch.zip_path) as bundle:
+        assert bundle.namelist() == [
+            "A list/01 - file.mp3",
+            "A list/02 - file.mp3",
+            "A list/03 - file.mp3",
+        ]
+    assert [call[0] for call in downloader.calls] == [
+        "aaaaaaaaaaa",
+        "bbbbbbbbbbb",
+        "ccccccccccc",
+        "bbbbbbbbbbb",
+    ]
+
+
+def test_transient_failure_is_retried_with_backoff(settings, executor):
+    downloader = FlakyDownloader("aaaaaaaaaaa", failures=2, code="forbidden")
+    naps: list[float] = []
+    registry = make_registry(settings, executor, downloader, sleep=naps.append)
+
+    batch = registry.submit_batch("A list", ITEMS[:1], preset_by_key("mp3-192"))
+    executor.run_next()
+
+    assert batch.items[0].state == JobState.DONE
+    assert [call[0] for call in downloader.calls] == ["aaaaaaaaaaa"] * 3
+    assert naps == [2.0, 5.0]
+
+
+def test_transient_failure_gives_up_after_three_tries(settings, executor):
+    downloader = FlakyDownloader("aaaaaaaaaaa", failures=99, code="network")
+    naps: list[float] = []
+    registry = make_registry(settings, executor, downloader, sleep=naps.append)
+
+    batch = registry.submit_batch("A list", ITEMS[:1], preset_by_key("mp3-192"))
+    executor.run_next()
+
+    assert batch.items[0].state == JobState.FAILED
+    assert batch.items[0].error.code == "network"
+    assert len(downloader.calls) == 3
+    assert naps == [2.0, 5.0]
+    assert batch.state == JobState.FAILED
+
+
+def test_permanent_failures_are_not_retried(settings, executor):
+    downloader = FlakyDownloader("aaaaaaaaaaa", failures=99, code="private")
+    naps: list[float] = []
+    registry = make_registry(settings, executor, downloader, sleep=naps.append)
+
+    batch = registry.submit_batch("A list", ITEMS[:1], preset_by_key("mp3-192"))
+    executor.run_next()
+
+    assert batch.items[0].state == JobState.FAILED
+    assert len(downloader.calls) == 1
+    assert naps == []
+
+
+def test_playlist_items_are_spaced_apart(settings, executor):
+    naps: list[float] = []
+    registry = make_registry(settings, executor, sleep=naps.append)
+
+    batch = registry.submit_batch("A list", ITEMS[:2], preset_by_key("mp3-192"))
+    executor.run_next()
+
+    assert [job.state for job in batch.items] == [JobState.DONE, JobState.DONE]
+    assert naps == [ITEM_GAP_SECONDS]
+
+
+def test_retry_is_refused_while_the_batch_is_still_queued(settings, executor):
+    registry = make_registry(settings, executor)
+    batch = registry.submit_batch("A list", ITEMS, preset_by_key("mp3-192"))
+
+    with pytest.raises(RetryUnavailable, match="Wait for this playlist"):
+        registry.retry_batch(batch.id)
+
+
+def test_retry_is_refused_after_a_batch_was_cancelled(settings, executor):
+    registry = make_registry(settings, executor)
+    batch = registry.submit_batch("A list", ITEMS, preset_by_key("mp3-192"))
+    registry.cancel_batch(batch.id)
+
+    with pytest.raises(RetryUnavailable, match="cancelled"):
+        registry.retry_batch(batch.id)
+
+
+def test_retry_is_refused_when_the_saved_files_are_gone(settings, executor):
+    downloader = FlakyDownloader("bbbbbbbbbbb", failures=1, code="private")
+    registry = make_registry(settings, executor, downloader)
+    batch = registry.submit_batch("A list", ITEMS, preset_by_key("mp3-192"))
+    executor.run_next()
+
+    for job in batch.saved:
+        job.file_path.unlink()
+
+    with pytest.raises(RetryUnavailable, match="saved files are gone"):
+        registry.retry_batch(batch.id)
+
+
+def test_retry_is_refused_when_the_queue_is_full(settings, executor):
+    downloader = FlakyDownloader("bbbbbbbbbbb", failures=1, code="private")
+    registry = make_registry(settings, executor, downloader)  # capacity 2
+    batch = registry.submit_batch("A list", ITEMS, preset_by_key("mp3-192"))
+    executor.run_next()
+
+    registry.submit("dQw4w9WgXcQ", preset_by_key("mp4-720"))
+    registry.submit("dQw4w9WgXcQ", preset_by_key("mp4-720"))
+
+    with pytest.raises(QueueFull):
+        registry.retry_batch(batch.id)
+
+
+def test_cancelling_a_queued_retry_keeps_the_saved_files(settings, executor):
+    downloader = FlakyDownloader("bbbbbbbbbbb", failures=1, code="private")
+    registry = make_registry(settings, executor, downloader)
+    batch = registry.submit_batch("A list", ITEMS, preset_by_key("mp3-192"))
+    executor.run_next()
+
+    registry.retry_batch(batch.id)
+    registry.cancel_batch(batch.id)
+
+    assert batch.state == JobState.DONE
+    assert batch.zip_path is not None and batch.zip_path.exists()
+    with zipfile.ZipFile(batch.zip_path) as bundle:
+        assert bundle.namelist() == ["A list/01 - file.mp3", "A list/03 - file.mp3"]
+
+
+def test_cancelling_a_running_retry_keeps_the_saved_files(settings, executor):
+    downloader = FlakyDownloader("bbbbbbbbbbb", failures=1, code="private")
+    registry = make_registry(settings, executor, downloader)
+    holder: dict[str, str] = {}
+
+    class CancelRetry(FakeDownloader):
+        def download(self, video_id, preset, destination, on_progress, should_cancel):
+            self.calls.append((video_id, preset.key))
+            registry.cancel_batch(holder["id"])
+            raise JobCancelled()
+
+    batch = registry.submit_batch("A list", ITEMS, preset_by_key("mp3-192"))
+    holder["id"] = batch.id
+    executor.run_next()
+
+    registry._downloader = CancelRetry()
+    registry.retry_batch(batch.id)
+    executor.run_next()
+
+    assert batch.state == JobState.DONE
+    assert batch.items[1].state == JobState.CANCELLED
+    with zipfile.ZipFile(batch.zip_path) as bundle:
+        assert bundle.namelist() == ["A list/01 - file.mp3", "A list/03 - file.mp3"]

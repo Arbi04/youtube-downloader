@@ -51,10 +51,11 @@ def create_app(
     settings: Settings | None = None,
     downloader: Downloader | None = None,
     executor=None,
+    sleep=None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     downloader = downloader or YtDlpDownloader(settings)
-    registry = JobRegistry(downloader, settings, executor=executor)
+    registry = JobRegistry(downloader, settings, executor=executor, sleep=sleep)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:

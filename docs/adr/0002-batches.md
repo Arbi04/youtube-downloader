@@ -10,12 +10,13 @@ A **Batch** downloads every video in a playlist under a single Preset and delive
 - **A failing item does not stop the Batch.** Private, age-restricted, and geo-blocked videos are common in real playlists, so the Batch records a per-item failure and continues. If *every* item fails, the Batch is `failed` and no archive is offered.
 - **Presets are offered unconditionally for playlists.** Deciding availability up front would cost one metadata request per item, making a 25-item Preview slower than the download itself. The format selector already caps height per item.
 - **25 items maximum**, truncated from the front. The limit is about temp disk and the user's patience, not about YouTube.
-- **A finished Batch can retry only its failed items.** The retry starts a new, smaller Batch with the same preset and leaves the earlier archive downloadable, so a transient 403 on two items does not re-download twenty.
+- **Retrying happens inside the same Batch.** Only the failed items go back to `queued`; the item list, the counter, and the archive keep the playlist's original numbering, and the one ZIP is rebuilt from every saved file once the retry finishes. A new Batch would restart `0 of 14 saved` and force the user to download two archives for one playlist.
+- **Transient failures are retried automatically.** A 403, an HTTP 429, or a dropped connection is attempted up to three times with a 2s then 5s pause before the item is marked failed. Permanent failures (private, age-restricted) are not retried. Items are spaced two seconds apart to avoid provoking a rate limit.
 - **`/playlist?list=` only.** `watch?v=…&list=…` stays a single video, so a link copied from a video page never silently turns into 25 downloads.
 
 ## Consequences
 
 - A Batch can hold a worker slot for many minutes; a second Batch waits even when the other worker is idle. Accepted while `MAX_CONCURRENT_JOBS=2`.
 - Temp usage grows with the playlist: 25 × ~30 MB is roughly 750 MB before the ZIP is built. The ZIP is stored, not deflated — media does not compress.
-- Cancellation is still cooperative and still all-or-nothing: it stops the item in flight and marks the rest cancelled. Per-item cancellation was not worth the UI.
+- Cancellation is still cooperative: it stops the item in flight and marks the rest cancelled. Cancelling a fresh Batch discards its files; cancelling a retry keeps the files saved by the first pass and rebuilds the archive. Per-item cancellation was not worth the UI.
 - The archive is deleted after it has been served, like any single file; abandoning the page leaves it to the two-hour startup sweep.

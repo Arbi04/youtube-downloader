@@ -312,15 +312,18 @@ body {
   margin: 0 0 16px;
 }
 
-/* Retry sits beside the archive button, not stacked under it. */
-.job .btn + .btn {
-  margin-left: 12px;
+/* One row of actions. Flex + gap keeps "Save archive" and "Retry" side by
+   side without shadows or padding spilling over the card. */
+.job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-top: 16px;
 }
 
-/* The earlier archive belongs to the previous batch, so it lives outside the
-   new card — but it still needs air between it and the card's border. */
-.batch-retry > .job-note {
-  margin: 16px 0 0;
+.job-actions:empty {
+  display: none;
 }
 
 .error {

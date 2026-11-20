@@ -35,6 +35,10 @@ def downloader():
             "HTTP Error 403: Forbidden",
             "forbidden",
         ),
+        ("ERROR: HTTP Error 429: Too Many Requests", "rate_limited"),
+        ("ERROR: Unable to download webpage: HTTP Error 503: Service Unavailable", "network"),
+        ("ERROR: [Errno 104] Connection reset by peer", "network"),
+        ("ERROR: The read operation timed out", "network"),
         ("ERROR: something exploded", "unknown"),
     ],
 )

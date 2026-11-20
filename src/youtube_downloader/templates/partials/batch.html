@@ -55,31 +55,37 @@
     <div class="error" role="alert">
       Every video in this playlist failed. Nothing was saved.
     </div>
-  {% elif batch.zip_path %}
-    {% set saved = batch.saved | length %}
-    <a class="btn btn-primary" href="/batches/{{ batch.id }}/zip">
-      Save archive ({{ saved }} {{ "file" if saved == 1 else "files" }})
-    </a>
-  {% else %}
-    <button
-      class="btn btn-danger"
-      hx-post="/batches/{{ batch.id }}/cancel"
-      hx-target="#job"
-      hx-swap="outerHTML"
-    >
-      Cancel
-    </button>
   {% endif %}
 
-  {% if batch.finished and batch.state.value != "cancelled" and batch.failed %}
-    {% set failed = batch.failed | length %}
-    <button
-      class="btn"
-      hx-post="/batches/{{ batch.id }}/retry"
-      hx-target="#job-slot"
-      hx-swap="innerHTML"
-    >
-      Retry {{ failed }} failed {{ "item" if failed == 1 else "items" }}
-    </button>
-  {% endif %}
+  {% set saved = batch.saved | length %}
+  {% set failed = batch.failed | length %}
+  <div class="job-actions">
+    {% if batch.zip_path %}
+      <a class="btn btn-primary" href="/batches/{{ batch.id }}/zip">
+        Save archive ({{ saved }} {{ "file" if saved == 1 else "files" }})
+      </a>
+    {% endif %}
+
+    {% if batch.finished and batch.state.value != "cancelled" and failed %}
+      <button
+        class="btn"
+        hx-post="/batches/{{ batch.id }}/retry"
+        hx-target="#job"
+        hx-swap="outerHTML"
+      >
+        Retry {{ failed }} failed {{ "item" if failed == 1 else "items" }}
+      </button>
+    {% endif %}
+
+    {% if not batch.finished %}
+      <button
+        class="btn btn-danger"
+        hx-post="/batches/{{ batch.id }}/cancel"
+        hx-target="#job"
+        hx-swap="outerHTML"
+      >
+        Cancel
+      </button>
+    {% endif %}
+  </div>
 </div>
