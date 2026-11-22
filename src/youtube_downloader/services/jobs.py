@@ -22,6 +22,7 @@ from typing import Callable, Sequence
 
 from youtube_downloader.config import Settings
 from youtube_downloader.services.downloader import (
+    TRANSIENT_CODES,
     DownloadError,
     Downloader,
     JobCancelled,
@@ -31,9 +32,8 @@ from youtube_downloader.services.youtube import Preset
 
 SWEEP_AFTER_SECONDS = 2 * 60 * 60
 
-# A 403 or a dropped connection is usually temporary. Two waits, three tries.
+# Two waits, three tries: a 403 or a dropped connection is often temporary.
 RETRY_DELAYS = (2.0, 5.0)
-TRANSIENT_CODES = frozenset({"forbidden", "network", "rate_limited"})
 
 # A playlist walks through videos back to back; a short pause keeps YouTube
 # from treating 25 requests in a row as abuse.
@@ -84,6 +84,16 @@ class Job:
     def finished(self) -> bool:
         return self.state in TERMINAL_STATES
 
+    def requeue(self) -> None:
+        """Put a failed item back in line without changing its identity."""
+        self.state = JobState.QUEUED
+        self.progress = 0.0
+        self.speed = None
+        self.eta = None
+        self.error = None
+        self.cancel_requested = False
+        self.timed_out = False
+
 
 @dataclass
 class Batch:
@@ -97,6 +107,8 @@ class Batch:
     zip_path: Path | None = None
     created_at: float = field(default_factory=time.time)
     cancel_requested: bool = False
+    retrying: bool = False
+    generation: int = 0
 
     @property
     def finished(self) -> bool:
@@ -121,6 +133,19 @@ class Batch:
             (job.progress for job in self.items if job.state == JobState.RUNNING), 0.0
         )
         return round((settled + running / 100) / len(self.items) * 100, 1)
+
+    @property
+    def retry_item(self) -> Job | None:
+        """The item a retry is currently downloading, if any."""
+        return next(
+            (job for job in self.items if job.state == JobState.RUNNING), None
+        )
+
+    @property
+    def retry_progress(self) -> float:
+        """During a retry the bar belongs to the item being retried."""
+        item = self.retry_item
+        return round(item.progress, 1) if item else 0.0
 
 
 def safe_name(value: str, fallback: str) -> str:
@@ -257,24 +282,48 @@ class JobRegistry:
 
             self._enforce_capacity()
             for _, job in targets:
-                job.state = JobState.QUEUED
-                job.progress = 0.0
-                job.speed = None
-                job.eta = None
-                job.error = None
-                job.cancel_requested = False
-                job.timed_out = False
+                job.requeue()
             batch.state = JobState.QUEUED
             batch.zip_path = None
             batch.cancel_requested = False
+            batch.retrying = True
+            batch.generation += 1
             self._queued += 1
 
-        self._executor.submit(self._run_batch, batch, targets)
+        self._executor.submit(self._run_batch, batch, targets, batch.generation)
         return batch
 
     def _enforce_capacity(self) -> None:
         if self._running + self._queued >= self.capacity:
             raise QueueFull("Too many downloads in flight. Try again in a moment.")
+
+    @staticmethod
+    def _restore_failed(targets: Sequence[tuple[int, Job]]) -> None:
+        """Leave cancelled retry items retryable instead of losing them."""
+        for _, job in targets:
+            if job.state not in (JobState.DONE, JobState.FAILED):
+                job.state = JobState.FAILED
+                job.error = DownloadError("cancelled", "The retry was cancelled.")
+
+    def _settle_cancelled(
+        self,
+        batch: Batch,
+        targets: Sequence[tuple[int, Job]],
+        directory: Path,
+        keep_saved: bool,
+    ) -> None:
+        """Finish a cancelled run without losing a retry's saved files."""
+        if keep_saved and batch.saved:
+            self._restore_failed(targets)
+            batch.zip_path = build_archive(batch, directory)
+            batch.state = JobState.DONE
+        else:
+            for _, job in targets:
+                if job.state != JobState.DONE:
+                    job.state = JobState.CANCELLED
+            batch.state = JobState.CANCELLED
+            self.discard_batch(batch)
+        batch.retrying = False
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
@@ -304,16 +353,15 @@ class JobRegistry:
 
             batch.cancel_requested = True
             if batch.state == JobState.QUEUED:
-                for job in batch.items:
-                    if job.state != JobState.DONE:
-                        job.state = JobState.CANCELLED
-                if batch.saved:
-                    # A retry that never started still owns the files saved by
-                    # the first pass, so cancelling it keeps that archive.
-                    batch.zip_path = build_archive(batch, self.batch_dir(batch))
-                    batch.state = JobState.DONE
-                else:
-                    batch.state = JobState.CANCELLED
+                self._settle_cancelled(
+                    batch,
+                    list(enumerate(batch.items, start=1)),
+                    self.batch_dir(batch),
+                    keep_saved=True,
+                )
+                # The deferred runner is now stale; it must not touch the slot
+                # or rebuild the archive a second time.
+                batch.generation += 1
                 self._queued = max(0, self._queued - 1)
             return batch
 
@@ -370,22 +418,22 @@ class JobRegistry:
         self,
         batch: Batch,
         targets: Sequence[tuple[int, Job]] | None = None,
+        generation: int | None = None,
     ) -> None:
         resumed = targets is not None
         if targets is None:
             targets = list(enumerate(batch.items, start=1))
+        if generation is None:
+            generation = batch.generation
 
         with self._lock:
+            if generation != batch.generation:
+                # A cancelled retry was superseded by a newer one; the newer
+                # run owns the slot and the files.
+                return
             self._queued = max(0, self._queued - 1)
             if batch.cancel_requested:
-                for _, job in targets:
-                    if job.state != JobState.DONE:
-                        job.state = JobState.CANCELLED
-                if resumed and batch.saved:
-                    batch.zip_path = build_archive(batch, self.batch_dir(batch))
-                    batch.state = JobState.DONE
-                else:
-                    batch.state = JobState.CANCELLED
+                self._settle_cancelled(batch, targets, self.batch_dir(batch), resumed)
                 return
             batch.state = JobState.RUNNING
             self._running += 1
@@ -417,22 +465,16 @@ class JobRegistry:
 
         with self._lock:
             if batch.cancel_requested:
-                if resumed and batch.saved:
-                    # Cancelling a retry must not throw away the files that
-                    # were already saved before the retry started.
-                    batch.zip_path = build_archive(batch, directory)
-                    batch.state = JobState.DONE
-                else:
-                    batch.state = JobState.CANCELLED
-                    self.discard_batch(batch)
-                return
-
-            if batch.saved:
+                # Cancelling a retry must not throw away the files that were
+                # already saved, and its failed items stay retryable.
+                self._settle_cancelled(batch, targets, directory, resumed)
+            elif batch.saved:
                 batch.zip_path = build_archive(batch, directory)
                 batch.state = JobState.DONE
             else:
                 batch.state = JobState.FAILED
                 self.discard_batch(batch)
+            batch.retrying = False
 
     def _perform_with_retries(
         self,
@@ -465,11 +507,7 @@ class JobRegistry:
                 return
 
             with self._lock:
-                job.state = JobState.QUEUED
-                job.progress = 0.0
-                job.speed = None
-                job.eta = None
-                job.error = None
+                job.requeue()
 
     def _perform(
         self,

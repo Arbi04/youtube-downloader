@@ -18,17 +18,19 @@
   </p>
 
   {% if not batch.finished %}
+    {% set shown = batch.retry_progress if batch.retrying else batch.progress %}
     <div
       class="bar"
       role="progressbar"
-      aria-valuenow="{{ batch.progress }}"
+      aria-valuenow="{{ shown }}"
       aria-valuemin="0"
       aria-valuemax="100"
     >
-      <div class="bar-fill" style="width: {{ batch.progress }}%"></div>
+      <div class="bar-fill" style="width: {{ shown }}%"></div>
     </div>
     <p class="job-meta">
-      <strong>{{ "%.0f" | format(batch.progress) }}%</strong> of the playlist
+      <strong>{{ "%.0f" | format(shown) }}%</strong>
+      {% if batch.retrying %}of the item being retried{% else %}of the playlist{% endif %}
     </p>
   {% endif %}
 
@@ -55,6 +57,10 @@
     <div class="error" role="alert">
       Every video in this playlist failed. Nothing was saved.
     </div>
+  {% endif %}
+
+  {% if error %}
+    <div class="error" role="alert">{{ error }}</div>
   {% endif %}
 
   {% set saved = batch.saved | length %}

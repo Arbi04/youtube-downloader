@@ -371,6 +371,8 @@ def test_retry_reruns_only_failed_items_in_the_same_batch(settings, executor):
     ]
     assert batch.state == JobState.QUEUED
     assert batch.zip_path is None
+    assert batch.retrying is True
+    assert batch.retry_progress == 0.0
     assert [call[0] for call in downloader.calls] == [
         "aaaaaaaaaaa",
         "bbbbbbbbbbb",
@@ -381,6 +383,7 @@ def test_retry_reruns_only_failed_items_in_the_same_batch(settings, executor):
 
     assert [job.state for job in batch.items] == [JobState.DONE] * 3
     assert batch.state == JobState.DONE
+    assert batch.retrying is False
     # The item keeps its original position, so the archive has all three files.
     with zipfile.ZipFile(batch.zip_path) as bundle:
         assert bundle.namelist() == [
@@ -501,9 +504,24 @@ def test_cancelling_a_queued_retry_keeps_the_saved_files(settings, executor):
     registry.cancel_batch(batch.id)
 
     assert batch.state == JobState.DONE
+    assert batch.retrying is False
+    assert batch.items[1].state == JobState.FAILED
+    assert batch.items[1].error.code == "cancelled"
     assert batch.zip_path is not None and batch.zip_path.exists()
     with zipfile.ZipFile(batch.zip_path) as bundle:
         assert bundle.namelist() == ["A list/01 - file.mp3", "A list/03 - file.mp3"]
+
+    # Cancelling did not turn the item into an unretryable "cancelled" state.
+    registry.retry_batch(batch.id)
+    executor.run_next()  # the cancelled run is stale and must do nothing
+    executor.run_next()  # the new retry owns the batch
+    assert batch.items[1].state == JobState.DONE
+    with zipfile.ZipFile(batch.zip_path) as bundle:
+        assert bundle.namelist() == [
+            "A list/01 - file.mp3",
+            "A list/02 - file.mp3",
+            "A list/03 - file.mp3",
+        ]
 
 
 def test_cancelling_a_running_retry_keeps_the_saved_files(settings, executor):
@@ -526,6 +544,20 @@ def test_cancelling_a_running_retry_keeps_the_saved_files(settings, executor):
     executor.run_next()
 
     assert batch.state == JobState.DONE
-    assert batch.items[1].state == JobState.CANCELLED
+    assert batch.items[1].state == JobState.FAILED
+    assert batch.items[1].error.code == "cancelled"
     with zipfile.ZipFile(batch.zip_path) as bundle:
         assert bundle.namelist() == ["A list/01 - file.mp3", "A list/03 - file.mp3"]
+
+    # The failed item is still offered, so a later retry can finish the job.
+    registry._downloader = FakeDownloader()
+    registry.retry_batch(batch.id)
+    executor.run_next()
+
+    assert batch.items[1].state == JobState.DONE
+    with zipfile.ZipFile(batch.zip_path) as bundle:
+        assert bundle.namelist() == [
+            "A list/01 - file.mp3",
+            "A list/02 - file.mp3",
+            "A list/03 - file.mp3",
+        ]

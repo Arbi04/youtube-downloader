@@ -51,6 +51,9 @@ class Progress:
 ProgressCallback = Callable[[Progress], None]
 CancelCheck = Callable[[], bool]
 
+# Codes that usually mean "try again in a moment"; the Batch runner retries them.
+TRANSIENT_CODES = frozenset({"forbidden", "network", "rate_limited"})
+
 
 # yt-dlp colourises its messages; users should never see the escape codes.
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")

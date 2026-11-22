@@ -401,6 +401,7 @@ def test_retrying_failed_items_continues_the_same_batch(client_factory):
     # Same Batch and same counter; the archive is rebuilt, so no stale link.
     assert f'/batches/{batch_id}/zip' not in retried.text
     assert "2 of 3 saved" in retried.text
+    assert "of the item being retried" in retried.text
     assert "First song" in retried.text
     assert "Third song" in retried.text
     assert "Save the earlier archive" not in retried.text
@@ -412,6 +413,59 @@ def test_retrying_failed_items_continues_the_same_batch(client_factory):
     assert done.text.count("Save archive (3 files)") == 1
     assert "Retry" not in done.text
     assert "Save the earlier archive" not in done.text
+
+
+def test_saving_a_partial_archive_does_not_block_retry(client_factory):
+    downloader = FailOnceDownloader("bbbbbbbbbbb")
+    client, _, executor = client_factory(downloader)
+    _, batch_id = _start_batch(client)
+    executor.run_next()
+
+    partial = client.get(f"/batches/{batch_id}/zip")
+    assert partial.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(partial.content)) as bundle:
+        assert bundle.namelist() == [
+            "Test playlist/01 - file.mp3",
+            "Test playlist/03 - file.mp3",
+        ]
+
+    # Serving a partial archive keeps its files, so the failed item is still
+    # retryable in the exact "save what worked, then retry" order.
+    downloader.failing = None
+    retried = client.post(f"/batches/{batch_id}/retry")
+    assert retried.status_code == 200
+    executor.run_next()
+
+    done = client.get(f"/batches/{batch_id}")
+    assert "3 of 3 saved" in done.text
+    complete = client.get(f"/batches/{batch_id}/zip")
+    assert complete.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(complete.content)) as bundle:
+        assert bundle.namelist() == [
+            "Test playlist/01 - file.mp3",
+            "Test playlist/02 - file.mp3",
+            "Test playlist/03 - file.mp3",
+        ]
+
+
+def test_a_refused_retry_keeps_the_card_intact(client_factory):
+    downloader = FailOnceDownloader("bbbbbbbbbbb")
+    client, _, executor = client_factory(downloader)
+    _, batch_id = _start_batch(client)
+    executor.run_next()
+
+    batch = client.app.state.registry.get_batch(batch_id)
+    for job in batch.saved:
+        job.file_path.unlink()
+
+    response = client.post(f"/batches/{batch_id}/retry")
+
+    assert response.status_code == 409
+    assert "saved files are gone" in response.text
+    # The error lives inside the card; the item list and archive link survive.
+    assert "First song" in response.text
+    assert "Save archive (2 files)" in response.text
+    assert "Retry 1 failed item" in response.text
 
 
 def test_retry_is_refused_when_nothing_failed(client_factory):

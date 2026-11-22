@@ -47,9 +47,17 @@ def _render_job(request: Request, job: Job) -> HTMLResponse:
     )
 
 
-def _render_batch(request: Request, batch: Batch) -> HTMLResponse:
+def _render_batch(
+    request: Request,
+    batch: Batch,
+    error: str | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(
-        request, "partials/batch.html", {"batch": batch}
+        request,
+        "partials/batch.html",
+        {"batch": batch, "error": error},
+        status_code=status_code,
     )
 
 
@@ -220,12 +228,19 @@ def retry_batch(request: Request, batch_id: str) -> HTMLResponse:
     videos does not restart ``0 of 14 saved`` or produce a second ZIP. A 403 is
     often transient; a permanent failure is still reported per item.
     """
+    registry = request.app.state.registry
     try:
-        batch = request.app.state.registry.retry_batch(batch_id)
+        batch = registry.retry_batch(batch_id)
     except RetryUnavailable as exc:
-        return _error(request, str(exc), status_code=409)
+        current = registry.get_batch(batch_id)
+        if current is None:
+            return _error(request, "That batch is gone.", status_code=404)
+        return _render_batch(request, current, error=str(exc), status_code=409)
     except QueueFull as exc:
-        return _error(request, str(exc), status_code=429)
+        current = registry.get_batch(batch_id)
+        if current is None:
+            return _error(request, "That batch is gone.", status_code=404)
+        return _render_batch(request, current, error=str(exc), status_code=429)
 
     if batch is None:
         return _error(request, "That batch is gone.", status_code=404)
@@ -247,10 +262,16 @@ def batch_zip(request: Request, batch_id: str) -> Response:
     if batch is None or batch.zip_path is None or not batch.zip_path.exists():
         return HTMLResponse("That archive is no longer available.", status_code=404)
 
+    # A partial archive may be downloaded before the failed items are retried.
+    # Keep the saved files in that case; only a complete batch is discarded.
+    background = None
+    if batch.finished and not batch.failed:
+        background = BackgroundTask(registry.discard_batch, batch)
+
     return FileResponse(
         batch.zip_path,
         media_type="application/zip",
         filename=batch.zip_path.name,
-        background=BackgroundTask(registry.discard_batch, batch),
+        background=background,
     )
 
