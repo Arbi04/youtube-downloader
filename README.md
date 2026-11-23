@@ -1,6 +1,10 @@
 # YouTube Downloader
 
-A local web app that turns a YouTube link — a video or a playlist — into files you can actually play: pick a resolution or an MP3 bitrate, watch the progress bar, save the result. One user, one download at a time, no accounts, no database.
+[![CI](https://github.com/Arbi04/youtube-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/Arbi04/youtube-downloader/actions/workflows/ci.yml)
+
+A local web app that turns a YouTube link — a video or a playlist — into files you can actually play: pick a resolution or an MP3 bitrate, watch the progress bar, save the result. A single local user, no accounts, no database.
+
+**Status:** v1.0.0. Single videos, playlists up to 25 items, in-place retry of failed items, and one ZIP per playlist. Local-only by design.
 
 <p align="center">
   <img
@@ -86,6 +90,17 @@ and duration for each — with the same preset buttons.
 A 25-item video playlist can hold roughly 1 GB of temp files before the archive is
 built, so expect the disk to fill and clear as it runs.
 
+<p align="center">
+  <img
+    src="docs/playlist-retry.png"
+    alt="A finished 11-video playlist showing 10 of 11 saved, item 04 failed with an HTTP 403 explanation, and buttons to save the 10-file archive or retry the one failed item"
+    width="400"
+  />
+</p>
+
+A finished playlist keeps every item and its original number. One item failed here;
+**Retry 1 failed item** downloads only that video and rebuilds the same archive.
+
 ## Configuration
 
 All settings are environment variables, read once at startup.
@@ -142,7 +157,7 @@ Install Node.js (or Deno) and restart; the app detects it automatically.
 uv run pytest -q
 ```
 
-The suite is offline: `yt-dlp` is replaced by a fake behind the `Downloader` protocol, jobs run through a manual executor, and time is injected. No network, no sleeps. What the tests *cannot* prove is that a real download works — that stays a manual smoke check, because it depends on YouTube.
+The suite is offline: `yt-dlp` is replaced by a fake behind the `Downloader` protocol, jobs run through a manual executor, and time is injected. No network, no sleeps. CI runs the same command on Linux and Windows for every push and pull request. What the tests *cannot* prove is that a real download works — that stays a manual smoke check, because it depends on YouTube.
 
 ## Architecture
 
@@ -162,6 +177,10 @@ Three decisions are worth knowing before reading the code:
 - **`services/downloader.py` is the only yt-dlp import.** Everything else talks to the `Downloader` protocol. That seam is what keeps the suite offline and what would make swapping engines a local change.
 
 Vocabulary lives in [`GLOSSARY.md`](GLOSSARY.md): **Preview**, **Preset**, **Job**, **Batch**, **Playlist**.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).
 
 ## Legal
 

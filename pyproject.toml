@@ -1,8 +1,9 @@
 [project]
 name = "youtube-downloader"
-version = "0.1.0"
-description = "Add your description here"
+version = "1.0.0"
+description = "A local-only YouTube downloader with a single-video flow and one-ZIP playlist batches."
 readme = "README.md"
+license = "MIT"
 authors = [
     { name = "Arbi04", email = "arbirestandi12@gmail.com" }
 ]
@@ -14,6 +15,10 @@ dependencies = [
 
 [project.scripts]
 youtube-downloader = "youtube_downloader:main"
+
+[project.urls]
+Repository = "https://github.com/Arbi04/youtube-downloader"
+Issues = "https://github.com/Arbi04/youtube-downloader/issues"
 
 [build-system]
 requires = ["uv_build>=0.13.7,<0.14.0"]
