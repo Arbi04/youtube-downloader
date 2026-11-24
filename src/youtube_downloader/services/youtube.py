@@ -146,6 +146,7 @@ class Preset:
     label: str
     kind: PresetKind
     height: int | None = None
+    bitrate: int | None = None
     available: bool = True
 
     @property
@@ -155,9 +156,13 @@ class Preset:
 
 PRESETS: tuple[Preset, ...] = (
     Preset("mp4-360", "MP4 360p", PresetKind.VIDEO, height=360),
+    Preset("mp4-480", "MP4 480p", PresetKind.VIDEO, height=480),
     Preset("mp4-720", "MP4 720p", PresetKind.VIDEO, height=720),
     Preset("mp4-1080", "MP4 1080p", PresetKind.VIDEO, height=1080),
-    Preset("mp3-192", "MP3 192k", PresetKind.AUDIO),
+    Preset("mp4-1440", "MP4 1440p", PresetKind.VIDEO, height=1440),
+    Preset("mp3-128", "MP3 128k", PresetKind.AUDIO, bitrate=128),
+    Preset("mp3-192", "MP3 192k", PresetKind.AUDIO, bitrate=192),
+    Preset("mp3-320", "MP3 320k", PresetKind.AUDIO, bitrate=320),
 )
 
 PRESETS_BY_KEY = {preset.key: preset for preset in PRESETS}
@@ -284,6 +289,10 @@ def format_selector(preset: Preset) -> str:
     H.264 + AAC first so the file plays in Windows Media Player, QuickTime,
     phones, and editors; then any codec; then a progressive stream as a last
     resort for videos that only ship one.
+
+    Above 1080p YouTube rarely ships H.264, so the fallback usually picks
+    VP9/AV1 while the container stays MP4. The preset is a ceiling, not a
+    promise of an exact height or codec.
     """
     if preset.kind == PresetKind.AUDIO:
         return "bestaudio[ext=m4a]/bestaudio/best"

@@ -180,7 +180,10 @@ def test_a_full_stream_still_reads_as_incomplete_until_the_job_is_done(downloade
     assert [progress.percent for progress in seen] == [99.0, 99.0]
 
 
-@pytest.mark.parametrize(("preset_key", "expected"), [("mp4-720", 2), ("mp3-192", 1)])
+@pytest.mark.parametrize(
+    ("preset_key", "expected"),
+    [("mp4-720", 2), ("mp4-1440", 2), ("mp3-192", 1)],
+)
 def test_presets_declare_how_many_streams_they_download(
     downloader, monkeypatch, tmp_path, preset_key, expected
 ):
@@ -218,6 +221,43 @@ def test_presets_declare_how_many_streams_they_download(
     )
 
     assert captured["streams"] == expected
+
+
+@pytest.mark.parametrize("preset_key", ["mp3-128", "mp3-192", "mp3-320"])
+def test_audio_preset_passes_its_bitrate_to_ffmpeg(
+    downloader, monkeypatch, tmp_path, preset_key
+):
+    preset = preset_by_key(preset_key)
+    destination = tmp_path / "out"
+    destination.mkdir()
+    produced = destination / f"Video [dQw4w9WgXcQ] {preset_key}.{preset.extension}"
+    produced.write_bytes(b"data")
+    captured: dict = {}
+
+    class FakeYdl:
+        def __init__(self, options):
+            captured.update(options)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def extract_info(self, _url, download=False):
+            return {"requested_downloads": [{"filepath": str(produced)}]}
+
+    monkeypatch.setattr(downloader_module.yt_dlp, "YoutubeDL", FakeYdl)
+
+    downloader.download(
+        "dQw4w9WgXcQ", preset, destination, lambda _progress: None, lambda: False
+    )
+
+    assert captured["postprocessors"][0] == {
+        "key": "FFmpegExtractAudio",
+        "preferredcodec": "mp3",
+        "preferredquality": str(preset.bitrate),
+    }
 
 
 def test_progress_hook_raises_when_cancelled(downloader):

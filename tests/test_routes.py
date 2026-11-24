@@ -11,6 +11,7 @@ from fakes import PLAYLIST_ID, FakeDownloader, ManualExecutor
 from youtube_downloader.app import create_app
 from youtube_downloader.config import Settings
 from youtube_downloader.services.downloader import DownloadError
+from youtube_downloader.services.youtube import RawPreview
 
 VIDEO_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 VIDEO_ID = "dQw4w9WgXcQ"
@@ -80,7 +81,12 @@ def test_preview_renders_metadata_and_presets(client_factory):
     assert "Test video" in response.text
     assert "3:42" in response.text
     assert "MP4 360p" in response.text
+    assert "MP4 480p" in response.text
+    assert "MP4 1440p" in response.text
+    assert "MP3 128k" in response.text
     assert "MP3 192k" in response.text
+    assert "MP3 320k" in response.text
+    assert "VP9/AV1" not in response.text
 
 
 def test_preview_keeps_taller_presets_visible_but_disabled(client_factory):
@@ -89,7 +95,27 @@ def test_preview_keeps_taller_presets_visible_but_disabled(client_factory):
     response = client.post("/preview", data={"url": VIDEO_URL})
 
     assert "max 720p" in response.text
-    assert 'value="mp4-1080" disabled' in " ".join(response.text.split())
+    compact = " ".join(response.text.split())
+    assert 'value="mp4-1080" disabled' in compact
+    assert 'value="mp4-1440" disabled' in compact
+
+
+def test_preview_warns_about_the_codec_above_1080p(client_factory):
+    downloader = FakeDownloader(
+        RawPreview(
+            video_id=VIDEO_ID,
+            title="Tall video",
+            duration_seconds=60,
+            thumbnail_url=None,
+            heights=(1080, 1440),
+        )
+    )
+    client, _, _ = client_factory(downloader)
+
+    response = client.post("/preview", data={"url": VIDEO_URL})
+
+    assert "VP9/AV1" in response.text
+    assert 'value="mp4-1440" disabled' not in " ".join(response.text.split())
 
 
 def test_preview_rejects_non_youtube_links(client_factory):
@@ -137,10 +163,11 @@ def test_finished_job_offers_the_file_and_stops_polling(client_factory):
     assert "hx-trigger" not in response.text
 
 
-def test_preset_above_the_video_height_is_refused(client_factory):
+@pytest.mark.parametrize("preset", ["mp4-1080", "mp4-1440"])
+def test_preset_above_the_video_height_is_refused(client_factory, preset):
     client, _, _ = client_factory()
 
-    response, job_id = _start_job(client, preset="mp4-1080", max_height="720")
+    response, job_id = _start_job(client, preset=preset, max_height="720")
 
     assert response.status_code == 409
     assert job_id is None
@@ -229,6 +256,8 @@ def test_playlist_preview_lists_items_and_offers_every_preset(client_factory):
     assert "First song" in response.text
     assert "Third song" in response.text
     assert downloader.playlist_calls == [PLAYLIST_ID]
+    assert "MP3 320k" in response.text
+    assert "tens of GB" in response.text
     assert "disabled" not in response.text
 
 

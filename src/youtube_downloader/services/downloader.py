@@ -376,7 +376,11 @@ class YtDlpDownloader:
         if preset.kind == PresetKind.AUDIO:
             options["writethumbnail"] = True
             options["postprocessors"] = [
-                {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"},
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": str(preset.bitrate or 192),
+                },
                 {"key": "FFmpegMetadata"},
                 {"key": "EmbedThumbnail"},
             ]

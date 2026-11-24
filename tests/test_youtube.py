@@ -2,6 +2,7 @@ import pytest
 
 from youtube_downloader.services.youtube import (
     MAX_BATCH_ITEMS,
+    PRESETS,
     InvalidUrl,
     PlaylistTarget,
     PresetKind,
@@ -75,24 +76,60 @@ def test_watch_url_is_canonical():
     assert watch_url(VIDEO_ID) == f"https://www.youtube.com/watch?v={VIDEO_ID}"
 
 
-def test_video_selector_prefers_h264_then_falls_back():
-    selector = format_selector(preset_by_key("mp4-720"))
+@pytest.mark.parametrize(
+    ("preset_key", "height"),
+    [
+        ("mp4-360", 360),
+        ("mp4-480", 480),
+        ("mp4-720", 720),
+        ("mp4-1080", 1080),
+        ("mp4-1440", 1440),
+    ],
+)
+def test_video_selector_prefers_h264_then_falls_back(preset_key, height):
+    selector = format_selector(preset_by_key(preset_key))
 
     assert selector == (
-        "bestvideo[height<=720][vcodec^=avc1]+bestaudio[ext=m4a]"
-        "/bestvideo[height<=720]+bestaudio"
-        "/best[height<=720]"
+        f"bestvideo[height<={height}][vcodec^=avc1]+bestaudio[ext=m4a]"
+        f"/bestvideo[height<={height}]+bestaudio"
+        f"/best[height<={height}]"
     )
 
 
-def test_audio_selector_ignores_height():
-    assert format_selector(preset_by_key("mp3-192")) == "bestaudio[ext=m4a]/bestaudio/best"
+@pytest.mark.parametrize("preset_key", ["mp3-128", "mp3-192", "mp3-320"])
+def test_audio_selector_ignores_height(preset_key):
+    selector = format_selector(preset_by_key(preset_key))
+
+    assert selector == "bestaudio[ext=m4a]/bestaudio/best"
 
 
 def test_preset_extensions():
     assert preset_by_key("mp4-360").extension == "mp4"
+    assert preset_by_key("mp4-480").extension == "mp4"
+    assert preset_by_key("mp4-1440").extension == "mp4"
+    assert preset_by_key("mp3-128").extension == "mp3"
     assert preset_by_key("mp3-192").extension == "mp3"
+    assert preset_by_key("mp3-320").extension == "mp3"
     assert preset_by_key("mp3-192").kind == PresetKind.AUDIO
+
+
+def test_preset_ladder_pairs_video_heights_with_audio_bitrates():
+    assert [preset.key for preset in PRESETS] == [
+        "mp4-360",
+        "mp4-480",
+        "mp4-720",
+        "mp4-1080",
+        "mp4-1440",
+        "mp3-128",
+        "mp3-192",
+        "mp3-320",
+    ]
+    assert [
+        preset.height for preset in PRESETS if preset.kind == PresetKind.VIDEO
+    ] == [360, 480, 720, 1080, 1440]
+    assert [
+        preset.bitrate for preset in PRESETS if preset.kind == PresetKind.AUDIO
+    ] == [128, 192, 320]
 
 
 def test_unknown_preset_is_rejected():
@@ -114,13 +151,24 @@ def test_short_video_disables_taller_presets_without_hiding_them():
     presets = {preset.key: preset for preset in available_presets(_preview(480))}
 
     assert presets["mp4-360"].available is True
+    assert presets["mp4-480"].available is True
     assert presets["mp4-720"].available is False
     assert presets["mp4-1080"].available is False
+    assert presets["mp4-1440"].available is False
+    assert presets["mp3-128"].available is True
     assert presets["mp3-192"].available is True
+    assert presets["mp3-320"].available is True
 
 
-def test_full_hd_video_enables_every_preset():
-    assert all(preset.available for preset in available_presets(_preview(1080)))
+def test_full_hd_video_disables_1440p():
+    presets = {preset.key: preset for preset in available_presets(_preview(1080))}
+
+    assert presets["mp4-1080"].available is True
+    assert presets["mp4-1440"].available is False
+
+
+def test_1440_video_enables_every_preset():
+    assert all(preset.available for preset in available_presets(_preview(1440)))
 
 
 def test_unknown_height_leaves_presets_available():

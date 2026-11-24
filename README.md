@@ -4,7 +4,7 @@
 
 A local web app that turns a YouTube link — a video or a playlist — into files you can actually play: pick a resolution or an MP3 bitrate, watch the progress bar, save the result. A single local user, no accounts, no database.
 
-**Status:** v1.0.0. Single videos, playlists up to 25 items, in-place retry of failed items, and one ZIP per playlist. Local-only by design.
+**Status:** v1.1.0. Single videos, playlists up to 25 items, MP4 360p–1440p or MP3 128/192/320, in-place retry of failed items, and one ZIP per playlist. Local-only by design.
 
 <p align="center">
   <img
@@ -57,7 +57,7 @@ then hands you a single ZIP.
 <p align="center">
   <img
     src="docs/screenshot_preview_progress_bar.png"
-    alt="The same page after a link is checked: a preview card with thumbnail, title, duration and up to 996p, four preset buttons with MP4 1080p disabled and labelled max 996p, and a job card showing MP4 720p, a pink progress bar at 32 percent with 16.3 MB/s, and a Cancel button"
+    alt="The same page after a link is checked: a preview card with thumbnail, title, duration and up to 996p, eight preset buttons with MP4 1080p and MP4 1440p disabled and labelled max 996p, and a job card showing MP4 720p, a pink progress bar at 32 percent with 16.3 MB/s, and a Cancel button"
     width="720"
   />
 </p>
@@ -68,10 +68,11 @@ job is.
 
 | Preset | What you get |
 | --- | --- |
-| `mp4-360` / `mp4-720` / `mp4-1080` | H.264 + AAC in an MP4, merged with ffmpeg. H.264 is preferred so the file plays in Windows Media Player, QuickTime, phones, and editors; other codecs are used only when H.264 is unavailable. |
-| `mp3-192` | MP3 at 192 kbps with ID3 tags and the thumbnail embedded as cover art. |
+| `mp4-360` / `mp4-480` / `mp4-720` / `mp4-1080` | H.264 + AAC in an MP4, merged with ffmpeg. H.264 is preferred so the file plays in Windows Media Player, QuickTime, phones, and editors; other codecs are used only when H.264 is unavailable. |
+| `mp4-1440` | An MP4 capped at 1440p. YouTube rarely ships H.264 above 1080p, so this is usually VP9/AV1 in an MP4: modern players handle it, older desktop players may not. |
+| `mp3-128` / `mp3-192` / `mp3-320` | MP3 at the chosen bitrate with ID3 tags and the thumbnail embedded as cover art. Source audio is usually AAC around 128 kbps or Opus around 160 kbps, so 320 is a size choice, not a quality upgrade. |
 
-Presets taller than the source video stay visible but disabled, labelled `max 720p`, so you can see the limit instead of guessing why a button is missing.
+Presets taller than the source video stay visible but disabled, labelled `max 720p`, so you can see the limit instead of guessing why a button is missing. A preset is a ceiling, not an exact height: a 360p request can deliver 240p when 360p is missing.
 
 ## Playlists
 
@@ -87,8 +88,8 @@ and duration for each — with the same preset buttons.
 - **Transient errors retry themselves.** A 403, an HTTP 429, or a dropped connection is tried up to three times — waiting 2 seconds, then 5 — before the item is marked failed. Items are also spaced two seconds apart so a long playlist does not look like abuse.
 - **`watch?v=…&list=…` is still one video.** Only a `/playlist` link starts a Batch, so a link copied from a video page never silently turns into 25 downloads.
 
-A 25-item video playlist can hold roughly 1 GB of temp files before the archive is
-built, so expect the disk to fill and clear as it runs.
+A 25-item playlist can hold several GB of temp files at 1080p and tens of GB at
+1440p before the archive is built, so expect the disk to fill and clear as it runs.
 
 <p align="center">
   <img
@@ -145,6 +146,8 @@ Install Node.js (or Deno) and restart; the app detects it automatically.
 ## Known limitations
 
 - **No channels** — a channel URL is not a playlist. Playlists are capped at 25 videos, all with one preset.
+- **No 4K** — the ladder stops at 1440p. A 25-item 2160p batch can need tens of GB, and the codec caveat is the same.
+- **Above 1080p is usually VP9/AV1** — the file is still MP4, but older desktop players may refuse it. This is a YouTube format limit, not a setting.
 - **No history and no database** — job state is in memory, so a restart drops whatever was in flight.
 - **Files are temporary** — the server deletes its copy after the browser has the file, and sweeps leftovers older than two hours at startup. A Batch archive is deleted the same way, which means it is gone once you have downloaded it.
 - **Not multi-user** — no auth, no per-user quotas.
@@ -170,10 +173,11 @@ templates/         Jinja2 + HTMX fragments, no build step
 static/            hand-written CSS, vendored htmx
 ```
 
-Three decisions are worth knowing before reading the code:
+Four decisions are worth knowing before reading the code:
 
 - **Jobs run in-process.** No Redis, no Celery, no database — see [`docs/adr/0001-in-process-jobs.md`](docs/adr/0001-in-process-jobs.md). The consequence is that cancellation is cooperative: Python cannot kill a thread, so the worker checks a flag on each progress hook.
 - **A Batch is one worker slot, not one Job per item** — see [`docs/adr/0002-batches.md`](docs/adr/0002-batches.md). Items run sequentially and produce a single archive.
+- **Presets are ceilings, not format strings** — see [`docs/adr/0003-presets.md`](docs/adr/0003-presets.md). Above 1080p YouTube usually serves VP9/AV1 even though the container stays MP4.
 - **`services/downloader.py` is the only yt-dlp import.** Everything else talks to the `Downloader` protocol. That seam is what keeps the suite offline and what would make swapping engines a local change.
 
 Vocabulary lives in [`GLOSSARY.md`](GLOSSARY.md): **Preview**, **Preset**, **Job**, **Batch**, **Playlist**.
