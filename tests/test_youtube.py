@@ -90,7 +90,8 @@ def test_video_selector_prefers_h264_then_falls_back(preset_key, height):
     selector = format_selector(preset_by_key(preset_key))
 
     assert selector == (
-        f"bestvideo[height<={height}][vcodec^=avc1]+bestaudio[ext=m4a]"
+        f"bestvideo[height={height}][vcodec^=avc1]+bestaudio[ext=m4a]"
+        f"/bestvideo[height<={height}]+bestaudio[ext=m4a]"
         f"/bestvideo[height<={height}]+bestaudio"
         f"/best[height<={height}]"
     )

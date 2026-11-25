@@ -286,20 +286,22 @@ def available_presets(preview: Preview) -> list[Preset]:
 def format_selector(preset: Preset) -> str:
     """yt-dlp format string for a preset.
 
-    H.264 + AAC first so the file plays in Windows Media Player, QuickTime,
-    phones, and editors; then any codec; then a progressive stream as a last
-    resort for videos that only ship one.
+    Height wins over codec. H.264 + AAC is preferred *at the preset's exact
+    height*, because that combination plays in Windows Media Player, QuickTime,
+    phones, and editors. Above 1080p YouTube rarely ships H.264, so the
+    exact-height term misses and the next term keeps the best stream under the
+    ceiling — VP9/AV1 at 1440p — instead of silently dropping to a shorter
+    H.264 stream. Then any audio, then a progressive stream as a last resort.
 
-    Above 1080p YouTube rarely ships H.264, so the fallback usually picks
-    VP9/AV1 while the container stays MP4. The preset is a ceiling, not a
-    promise of an exact height or codec.
+    The preset is still a ceiling, not a promise of an exact height or codec.
     """
     if preset.kind == PresetKind.AUDIO:
         return "bestaudio[ext=m4a]/bestaudio/best"
 
     height = preset.height
     return (
-        f"bestvideo[height<={height}][vcodec^=avc1]+bestaudio[ext=m4a]"
+        f"bestvideo[height={height}][vcodec^=avc1]+bestaudio[ext=m4a]"
+        f"/bestvideo[height<={height}]+bestaudio[ext=m4a]"
         f"/bestvideo[height<={height}]+bestaudio"
         f"/best[height<={height}]"
     )

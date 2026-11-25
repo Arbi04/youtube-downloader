@@ -4,7 +4,7 @@
 
 A local web app that turns a YouTube link — a video or a playlist — into files you can actually play: pick a resolution or an MP3 bitrate, watch the progress bar, save the result. A single local user, no accounts, no database.
 
-**Status:** v1.1.0. Single videos, playlists up to 25 items, MP4 360p–1440p or MP3 128/192/320, in-place retry of failed items, and one ZIP per playlist. Local-only by design.
+**Status:** v1.1.1. Single videos, playlists up to 25 items, MP4 360p–1440p or MP3 128/192/320, in-place retry of failed items, and one ZIP per playlist. Local-only by design.
 
 <p align="center">
   <img
@@ -68,11 +68,11 @@ job is.
 
 | Preset | What you get |
 | --- | --- |
-| `mp4-360` / `mp4-480` / `mp4-720` / `mp4-1080` | H.264 + AAC in an MP4, merged with ffmpeg. H.264 is preferred so the file plays in Windows Media Player, QuickTime, phones, and editors; other codecs are used only when H.264 is unavailable. |
+| `mp4-360` / `mp4-480` / `mp4-720` / `mp4-1080` | H.264 + AAC in an MP4, merged with ffmpeg. H.264 is preferred at the requested height so the file plays in Windows Media Player, QuickTime, phones, and editors; other codecs are used only when H.264 is unavailable. |
 | `mp4-1440` | An MP4 capped at 1440p. YouTube rarely ships H.264 above 1080p, so this is usually VP9/AV1 in an MP4: modern players handle it, older desktop players may not. |
 | `mp3-128` / `mp3-192` / `mp3-320` | MP3 at the chosen bitrate with ID3 tags and the thumbnail embedded as cover art. Source audio is usually AAC around 128 kbps or Opus around 160 kbps, so 320 is a size choice, not a quality upgrade. |
 
-Presets taller than the source video stay visible but disabled, labelled `max 720p`, so you can see the limit instead of guessing why a button is missing. A preset is a ceiling, not an exact height: a 360p request can deliver 240p when 360p is missing.
+Presets taller than the source video stay visible but disabled, labelled `max 720p`, so you can see the limit instead of guessing why a button is missing. A preset is a ceiling, not an exact height: a 360p request can deliver 240p when 360p is missing. Height wins over codec: a 1440p request never drops to 1080p just because that is the tallest H.264 stream.
 
 ## Playlists
 

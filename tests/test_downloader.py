@@ -11,7 +11,7 @@ from youtube_downloader.services.downloader import (
     YtDlpDownloader,
     map_error,
 )
-from youtube_downloader.services.youtube import preset_by_key
+from youtube_downloader.services.youtube import format_selector, preset_by_key
 
 
 @pytest.fixture
@@ -258,6 +258,60 @@ def test_audio_preset_passes_its_bitrate_to_ffmpeg(
         "preferredcodec": "mp3",
         "preferredquality": str(preset.bitrate),
     }
+
+
+def _format(format_id, height, vcodec, acodec, ext, tbr):
+    return {
+        "format_id": format_id,
+        "height": height,
+        "vcodec": vcodec,
+        "acodec": acodec,
+        "ext": ext,
+        "protocol": "https",
+        "tbr": tbr,
+    }
+
+
+def _pick_format(preset_key):
+    """Run the real yt-dlp selector over a synthetic format list."""
+    formats = [
+        _format("137", 1080, "avc1.640028", "none", "mp4", 819),
+        _format("399", 1080, "av01.0.08M.08", "none", "mp4", 561),
+        _format("400", 1440, "av01.0.12M.08", "none", "mp4", 1224),
+        _format("271", 1440, "vp9", "none", "webm", 2263),
+        _format("140", None, "none", "mp4a.40.2", "m4a", 128),
+        _format("251", None, "none", "opus", "webm", 148),
+    ]
+    ydl = downloader_module.yt_dlp.YoutubeDL({"quiet": True})
+    selector = ydl.build_format_selector(
+        format_selector(preset_by_key(preset_key))
+    )
+
+    return list(
+        selector(
+            {
+                "formats": formats,
+                "has_merged_format": False,
+                "incomplete_formats": False,
+            }
+        )
+    )[0]
+
+
+def test_1080_selector_keeps_h264_at_the_requested_height():
+    picked = _pick_format("mp4-1080")
+
+    assert picked["format_id"] == "137+140"
+    assert picked["height"] == 1080
+
+
+def test_1440_selector_keeps_1440_instead_of_dropping_to_1080_h264():
+    """A 1440p request must not settle for a 1080p H.264 stream."""
+    picked = _pick_format("mp4-1440")
+
+    assert picked["height"] == 1440
+    assert not picked["vcodec"].startswith("avc1")
+    assert picked["acodec"] == "mp4a.40.2"
 
 
 def test_progress_hook_raises_when_cancelled(downloader):
