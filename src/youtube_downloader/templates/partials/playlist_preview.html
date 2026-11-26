@@ -30,6 +30,9 @@
     {% for preset in presets %}
       <button class="preset" type="submit" name="preset" value="{{ preset.key }}">
         <span class="preset-label">{{ preset.label }}</span>
+        {% if preset.height and preset.height > 1080 %}
+          <span class="preset-note">usually VP9/AV1</span>
+        {% endif %}
       </button>
     {% endfor %}
   </form>

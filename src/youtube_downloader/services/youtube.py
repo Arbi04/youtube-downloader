@@ -149,6 +149,12 @@ class Preset:
     bitrate: int | None = None
     available: bool = True
 
+    def __post_init__(self) -> None:
+        if self.kind == PresetKind.VIDEO and not self.height:
+            raise ValueError(f"Video preset {self.key!r} needs a height.")
+        if self.kind == PresetKind.AUDIO and not self.bitrate:
+            raise ValueError(f"Audio preset {self.key!r} needs a bitrate.")
+
     @property
     def extension(self) -> str:
         return "mp3" if self.kind == PresetKind.AUDIO else "mp4"

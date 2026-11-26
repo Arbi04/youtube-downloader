@@ -98,23 +98,25 @@ def test_preview_keeps_taller_presets_visible_but_disabled(client_factory):
     compact = " ".join(response.text.split())
     assert 'value="mp4-1080" disabled' in compact
     assert 'value="mp4-1440" disabled' in compact
+    assert "usually VP9/AV1" not in response.text
 
 
-def test_preview_warns_about_the_codec_above_1080p(client_factory):
+@pytest.mark.parametrize("heights", [(1080, 1440), ()])
+def test_preview_notes_the_codec_on_the_1440_preset(client_factory, heights):
     downloader = FakeDownloader(
         RawPreview(
             video_id=VIDEO_ID,
             title="Tall video",
             duration_seconds=60,
             thumbnail_url=None,
-            heights=(1080, 1440),
+            heights=heights,
         )
     )
     client, _, _ = client_factory(downloader)
 
     response = client.post("/preview", data={"url": VIDEO_URL})
 
-    assert "VP9/AV1" in response.text
+    assert "usually VP9/AV1" in response.text
     assert 'value="mp4-1440" disabled' not in " ".join(response.text.split())
 
 
@@ -257,6 +259,7 @@ def test_playlist_preview_lists_items_and_offers_every_preset(client_factory):
     assert "Third song" in response.text
     assert downloader.playlist_calls == [PLAYLIST_ID]
     assert "MP3 320k" in response.text
+    assert "usually VP9/AV1" in response.text
     assert "tens of GB" in response.text
     assert "disabled" not in response.text
 

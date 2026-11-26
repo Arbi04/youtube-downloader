@@ -4,7 +4,7 @@
 
 A local web app that turns a YouTube link — a video or a playlist — into files you can actually play: pick a resolution or an MP3 bitrate, watch the progress bar, save the result. A single local user, no accounts, no database.
 
-**Status:** v1.1.1. Single videos, playlists up to 25 items, MP4 360p–1440p or MP3 128/192/320, in-place retry of failed items, and one ZIP per playlist. Local-only by design.
+**Status:** v1.1.2. Single videos, playlists up to 25 items, MP4 360p–1440p or MP3 128/192/320, in-place retry of failed items, and one ZIP per playlist. Local-only by design.
 
 <p align="center">
   <img
@@ -68,7 +68,7 @@ job is.
 
 | Preset | What you get |
 | --- | --- |
-| `mp4-360` / `mp4-480` / `mp4-720` / `mp4-1080` | H.264 + AAC in an MP4, merged with ffmpeg. H.264 is preferred at the requested height so the file plays in Windows Media Player, QuickTime, phones, and editors; other codecs are used only when H.264 is unavailable. |
+| `mp4-360` / `mp4-480` / `mp4-720` / `mp4-1080` | H.264 + AAC at the requested height when YouTube offers it, merged with ffmpeg. H.264 is preferred because it plays in Windows Media Player, QuickTime, phones, and editors; if only VP9/AV1 exists at that height, the file keeps its height and uses that codec instead of dropping to a shorter H.264 stream. |
 | `mp4-1440` | An MP4 capped at 1440p. YouTube rarely ships H.264 above 1080p, so this is usually VP9/AV1 in an MP4: modern players handle it, older desktop players may not. |
 | `mp3-128` / `mp3-192` / `mp3-320` | MP3 at the chosen bitrate with ID3 tags and the thumbnail embedded as cover art. Source audio is usually AAC around 128 kbps or Opus around 160 kbps, so 320 is a size choice, not a quality upgrade. |
 
@@ -160,7 +160,7 @@ Install Node.js (or Deno) and restart; the app detects it automatically.
 uv run pytest -q
 ```
 
-The suite is offline: `yt-dlp` is replaced by a fake behind the `Downloader` protocol, jobs run through a manual executor, and time is injected. No network, no sleeps. CI runs the same command on Linux and Windows for every push and pull request. What the tests *cannot* prove is that a real download works — that stays a manual smoke check, because it depends on YouTube.
+The suite is offline: downloads go through a fake behind the `Downloader` protocol, jobs run through a manual executor, and time is injected. One test runs yt-dlp's format-selection logic over a synthetic format list to pin height-over-codec behavior; it touches yt-dlp internals but still makes no network call. No network, no sleeps. CI runs the same command on Linux and Windows for every push and pull request. What the tests *cannot* prove is that a real download works — that stays a manual smoke check, because it depends on YouTube.
 
 ## Architecture
 
@@ -178,7 +178,7 @@ Four decisions are worth knowing before reading the code:
 - **Jobs run in-process.** No Redis, no Celery, no database — see [`docs/adr/0001-in-process-jobs.md`](docs/adr/0001-in-process-jobs.md). The consequence is that cancellation is cooperative: Python cannot kill a thread, so the worker checks a flag on each progress hook.
 - **A Batch is one worker slot, not one Job per item** — see [`docs/adr/0002-batches.md`](docs/adr/0002-batches.md). Items run sequentially and produce a single archive.
 - **Presets are ceilings, not format strings** — see [`docs/adr/0003-presets.md`](docs/adr/0003-presets.md). Above 1080p YouTube usually serves VP9/AV1 even though the container stays MP4.
-- **`services/downloader.py` is the only yt-dlp import.** Everything else talks to the `Downloader` protocol. That seam is what keeps the suite offline and what would make swapping engines a local change.
+- **`services/downloader.py` is the only yt-dlp import.** Everything else talks to the `Downloader` protocol. That seam keeps the download path fakeable and offline, and would make swapping engines a local change.
 
 Vocabulary lives in [`GLOSSARY.md`](GLOSSARY.md): **Preview**, **Preset**, **Job**, **Batch**, **Playlist**.
 

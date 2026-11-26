@@ -41,15 +41,10 @@
         <span class="preset-label">{{ preset.label }}</span>
         {% if not preset.available %}
           <span class="preset-note">max {{ preview.max_height }}p</span>
+        {% elif preset.height and preset.height > 1080 %}
+          <span class="preset-note">usually VP9/AV1</span>
         {% endif %}
       </button>
     {% endfor %}
   </form>
-
-  {% if preview.max_height and preview.max_height > 1080 %}
-    <p class="hint">
-      Above 1080p YouTube usually serves VP9/AV1. The file is still MP4, but
-      older desktop players may not open it.
-    </p>
-  {% endif %}
 </section>

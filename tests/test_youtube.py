@@ -5,6 +5,7 @@ from youtube_downloader.services.youtube import (
     PRESETS,
     InvalidUrl,
     PlaylistTarget,
+    Preset,
     PresetKind,
     Preview,
     RawPlaylistItem,
@@ -131,6 +132,16 @@ def test_preset_ladder_pairs_video_heights_with_audio_bitrates():
     assert [
         preset.bitrate for preset in PRESETS if preset.kind == PresetKind.AUDIO
     ] == [128, 192, 320]
+
+
+def test_video_preset_requires_a_height():
+    with pytest.raises(ValueError):
+        Preset("bad-video", "Bad video", PresetKind.VIDEO)
+
+
+def test_audio_preset_requires_a_bitrate():
+    with pytest.raises(ValueError):
+        Preset("bad-audio", "Bad audio", PresetKind.AUDIO)
 
 
 def test_unknown_preset_is_rejected():

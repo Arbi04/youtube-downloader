@@ -379,7 +379,7 @@ class YtDlpDownloader:
                 {
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
-                    "preferredquality": str(preset.bitrate or 192),
+                    "preferredquality": str(preset.bitrate),
                 },
                 {"key": "FFmpegMetadata"},
                 {"key": "EmbedThumbnail"},
